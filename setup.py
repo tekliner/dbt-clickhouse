@@ -61,6 +61,7 @@ setup(
     install_requires=[
         f'dbt-core=={dbt_version}',
         'clickhouse-driver>=0.2.1',
+        'requests<3.0.0',  # NOTE (oev81): added
     ],
     python_requires=">=3.6",
     platforms='any',
