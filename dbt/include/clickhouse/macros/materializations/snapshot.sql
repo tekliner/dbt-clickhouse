@@ -107,30 +107,110 @@
 
 {% endmaterialization %}
 
-{% macro clickhouse__post_snapshot(staging_relation) %}
-    {{ drop_relation_if_exists(staging_relation) }}
-{% endmacro %}
+-- {% macro clickhouse__post_snapshot(staging_relation) %}
+--     {{ drop_relation_if_exists(staging_relation) }}
+-- {% endmacro %}
 
-{% macro build_snapshot_staging_table(strategy, sql, target_relation) %}
-    {% set tmp_relation = make_temp_relation(target_relation) %}
+{% macro snapshot_staging_table(strategy, source_sql, target_relation) -%}
+  {#- TODO:
+    * add default__snapshot_staging_table to dbt project
+    * replace copy/paste with default__snapshot_staging_table
+  -#}
+  with snapshot_query as (
+      {{ source_sql }}
+  ),
+  snapshotted_data as (
+    select *,
+      {{ strategy.unique_key }} as dbt_unique_key
+    from {{ target_relation }}
+    where dbt_valid_to is null
+  ),
+  insertions_source_data as (
+    select
+      *,
+      {{ strategy.unique_key }} as dbt_unique_key,
+      {{ strategy.updated_at }} as dbt_updated_at,
+      {{ strategy.updated_at }} as dbt_valid_from,
+      nullif({{ strategy.updated_at }}, {{ strategy.updated_at }}) as dbt_valid_to,
+      {{ strategy.scd_id }} as dbt_scd_id
+    from snapshot_query
+  ),
+  updates_source_data as (
+    select
+        *,
+        {{ strategy.unique_key }} as dbt_unique_key,
+        {{ strategy.updated_at }} as dbt_updated_at,
+        {{ strategy.updated_at }} as dbt_valid_from,
+        {{ strategy.updated_at }} as dbt_valid_to
+    from snapshot_query
+  ),
+  {%- if strategy.invalidate_hard_deletes %}
+  deletes_source_data as (
+    select
+      *,
+      {{ strategy.unique_key }} as dbt_unique_key
+    from snapshot_query
+  ),
+  {% endif %}
+  insertions as (
+    select
+      'insert' as dbt_change_type,
+      source_data.*
+    from insertions_source_data as source_data
+    left outer join snapshotted_data on snapshotted_data.dbt_unique_key = source_data.dbt_unique_key
+    where snapshotted_data.dbt_unique_key is null
+      or (
+      snapshotted_data.dbt_unique_key is not null
+      and (
+        {{ strategy.row_changed }}
+      )
+    )
+  ),
+  updates as (
+    select
+      'update' as dbt_change_type,
+      source_data.*,
+      snapshotted_data.dbt_scd_id
+    from updates_source_data as source_data
+    join snapshotted_data on snapshotted_data.dbt_unique_key = source_data.dbt_unique_key
+    where (
+      {{ strategy.row_changed }}
+    )
+  )
+  {%- if strategy.invalidate_hard_deletes -%}
+  ,
+  deletes as (
+    select
+      'delete' as dbt_change_type,
+      source_data.*,
+      {{ snapshot_get_time() }} as dbt_valid_from,
+      {{ snapshot_get_time() }} as dbt_updated_at,
+      {{ snapshot_get_time() }} as dbt_valid_to,
+      snapshotted_data.dbt_scd_id
+    from snapshotted_data
+    left join deletes_source_data as source_data on snapshotted_data.dbt_unique_key = source_data.dbt_unique_key
+    where source_data.dbt_unique_key is null
+  )
+  {%- endif %}
 
-    {% set select = snapshot_staging_table(strategy, sql, target_relation) %}
-
-    {% call statement('build_snapshot_staging_relation') %}
-        {{ create_table_as(False, tmp_relation, select) }}
-    {% endcall %}
-
-    {% do return(tmp_relation) %}
-{% endmacro %}
+  select * from insertions
+  union all
+  select * from updates
+  {%- if strategy.invalidate_hard_deletes %}
+  union all
+  select * from deletes
+  {%- endif %}
+  SETTINGS join_use_nulls=1
+{%- endmacro %}
 
 {% macro clickhouse__snapshot_merge_sql_one(target, source, insert_cols, upsert) -%}
   {%- set insert_cols_csv = insert_cols | join(', ') -%}
 
   {% call statement('create_upsert_relation') %}
-    create table if not exists {{ upsert }} as {{ target }}
+    create table if not exists {{ upsert }} as {{ target }};
   {% endcall %}
 
-  {% call statement('insert_unchanged_date') %}
+  {% call statement('insert_unchanged') %}
     insert into {{ upsert }} ({{ insert_cols_csv }})
     select {% for column in insert_cols -%}
       {{ column }} {%- if not loop.last %}, {%- endif %}
@@ -141,7 +221,7 @@
     )
   {% endcall %}
 
- {% call statement('insert_updated_and_deleted') %}
+  {% call statement('insert_updated_and_deleted') %}
     insert into {{ upsert }} ({{ insert_cols_csv }})
     with updates_and_deletes as (
       select
@@ -171,10 +251,10 @@
   {% endcall %}
 
   {% call statement('drop_target_relation') %}
-    drop table if exists {{ target }}
+    drop table if exists {{ target }};
   {% endcall %}
 
   {% call statement('rename_upsert_relation') %}
-    rename table {{ upsert }} to {{ target }}
+    rename table {{ upsert }} to {{ target }};
   {% endcall %}
 {% endmacro %}
