@@ -87,7 +87,7 @@ class ClickhouseConnectionManager(SQLConnectionManager):
                 db_name='default',
                 username=credentials.user,
                 password=credentials.password,
-                timeout=(10, 600),
+                timeout=(10, 1200),
                 ch_settings={
                     'session_id': http.sessionid.generate_session_id(),  # NOTE (oev81): added
                     'session_timeout': 5*60,  # NOTE (oev81): added
