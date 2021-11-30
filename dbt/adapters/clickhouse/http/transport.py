@@ -134,7 +134,10 @@ class RequestsTransport(object):
         """
         query = query.rstrip('; \r\n')  # NOTE (oev81): added
 
-        query += FORMAT_SUFFIX  # NOTE (oev81): add here
+        # NOTE (oev81): adding FORMAT_SUFFIX not needed if
+        # default_format parameter or X-ClickHouse-Format header are specified.
+
+        # query += FORMAT_SUFFIX
 
         r = self._send(query, params=params, stream=True)
         lines = r.iter_lines()

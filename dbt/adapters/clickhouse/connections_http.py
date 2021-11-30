@@ -91,6 +91,7 @@ class ClickhouseConnectionManager(SQLConnectionManager):
                 ch_settings={
                     'session_id': http.sessionid.generate_session_id(),  # NOTE (oev81): added
                     'session_timeout': 5*60,  # NOTE (oev81): added
+                    'default_format': 'TabSeparatedWithNamesAndTypes',  # NOTE (oev81): added
                 },
             )
 
