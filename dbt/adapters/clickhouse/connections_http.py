@@ -1,6 +1,7 @@
 from typing import Optional, Any, Tuple
 
 import agate
+import io  # NOTE (oev81): added
 import time
 import dbt.exceptions
 
@@ -172,6 +173,8 @@ class ClickhouseConnectionManager(SQLConnectionManager):
         conn = self.get_thread_connection()
         client = conn.handle
 
+        csv_or_none = self._convert_bindings_to_csv(bindings)
+
         with self.exception_handler(sql):
             logger.debug(
                 'On {connection_name}: {sql}',
@@ -180,18 +183,18 @@ class ClickhouseConnectionManager(SQLConnectionManager):
             )
 
             # TODO: Convert to allow clickhouse type
-            format_bindings = []
-            for row in bindings.rows:
-                format_row = []
-                for v in row.values():
-                    if isinstance(v, Decimal):
-                        v = int(v)
-                    format_row.append(v)
-                format_bindings.append(format_row)
+            # format_bindings = []
+            # for row in bindings.rows:
+            #     format_row = []
+            #     for v in row.values():
+            #         if isinstance(v, Decimal):
+            #             v = int(v)
+            #         format_row.append(v)
+            #     format_bindings.append(format_row)
 
             pre = time.time()
 
-            client.execute(sql, format_bindings)
+            client.execute(sql, data=csv_or_none)  # NOTE (oev81): changed
 
             status = self.OK_STATUS
 
@@ -200,6 +203,31 @@ class ClickhouseConnectionManager(SQLConnectionManager):
                 status=status,
                 elapsed=(time.time() - pre),
             )
+
+    # NOTE (oev81): method added
+    def _convert_bindings_to_csv(
+        self,
+        bindings: Optional[Any],
+    ) -> Optional[str]:
+        if bindings is None:
+            return None
+
+        if isinstance(bindings, agate.Table):
+            return self._convert_agate_table_to_csv(bindings)
+
+        raise Exception(
+            f'Unexpected bindings type={type(bindings)}'
+        )
+
+    # NOTE (oev81): method added
+    def _convert_agate_table_to_csv(
+        self,
+        table: agate.Table,
+    ) -> str:
+        buff = io.StringIO()
+        table.to_csv(buff)
+
+        return buff.getvalue()
 
     @classmethod
     def get_credentials(cls, credentials):

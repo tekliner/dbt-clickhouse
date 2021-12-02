@@ -127,7 +127,8 @@ class RequestsTransport(object):
 
         super(RequestsTransport, self).__init__()
 
-    def execute(self, query, params=None):
+    # NOTE (oev81): parameter `data` added
+    def execute(self, query, params=None, data=None):
         """
         Query is returning rows and these rows should be parsed or
         there is nothing to return.
@@ -136,10 +137,15 @@ class RequestsTransport(object):
 
         # NOTE (oev81): adding FORMAT_SUFFIX not needed if
         # default_format parameter or X-ClickHouse-Format header are specified.
-
         # query += FORMAT_SUFFIX
 
-        r = self._send(query, params=params, stream=True)
+        # NOTE (oev81): call changed
+        r = self._send(
+            query,
+            params=params,
+            data=data,
+            stream=True,
+        )
         lines = r.iter_lines()
 
         try:
@@ -174,9 +180,22 @@ class RequestsTransport(object):
         """
         return self._send(query, params=params, stream=stream).text
 
-    def _send(self, data, params=None, stream=False):
-        data = data.encode('utf-8')
+    # NOTE (oev81): parameter `data` added
+    def _send(self, query, params=None, data=None, stream=False):
         params = params or {}
+
+        # NOTE (oev81): code block added
+        if isinstance(data, str):
+            data = data.encode('utf-8')
+
+        # NOTE (oev81): code block added
+        # Passing query, mostly via POST body, but in case of INSERT
+        # the query passed via GET parameter
+        if data is None:
+            data = query.encode('utf-8')
+        else:
+            params['query'] = query
+
         params['database'] = self.db_name
         params.update(self.ch_settings)
 
