@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/silentsokolov/dbt-clickhouse/master/etc/dbt-logo-full.svg" alt="dbt logo" width="300"/>
+  <img src="https://raw.githubusercontent.com/silentsokolov/dbt-clickhouse/master/etc/chdbt.png" alt="clickhouse dbt logo" width="300"/>
 </p>
 
 [![build](https://github.com/silentsokolov/dbt-clickhouse/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/silentsokolov/dbt-clickhouse/actions/workflows/build.yml)
@@ -63,4 +63,9 @@ your_profile_name:
       cluster: [cluster name]
       verify: [verify] # default False
       secure: [secure] # default False
+      connect_timeout: [10] # default 10
+      send_receive_timeout: [300] # default 300
+      sync_request_timeout: [5] # default 5
+      compress_block_size: [1048576] # default 1048576
+      compression: ['lz4'] # default '' (disable)
 ```
