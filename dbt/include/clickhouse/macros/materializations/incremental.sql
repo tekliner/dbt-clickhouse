@@ -111,7 +111,7 @@
     {% endif %}
   {% endif %}
 
-  {% if not is_atomic or existing_relation is none %}
+  {% if not is_atomic or existing_relation is none or inserts_only or unique_key is none %}
     -- atomic calls insert before exchange, so we skip it here
     {% call statement('main') %}
         {{ build_sql }}
