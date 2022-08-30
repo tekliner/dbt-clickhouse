@@ -85,9 +85,9 @@
               {{ currect_insert_sql }}
           {% endcall %}
           -- Insert all incremental updates from tmp table to the new table (old_relation)
-          {% set build_sql = clickhouse__incremental_insert_from_table(tmp_relation, old_relation) %}
+          {% set build_sql_insert = clickhouse__incremental_insert_from_table(tmp_relation, old_relation) %}
           {% call statement('main') %}
-            {{ build_sql }}
+            {{ build_sql_insert }}
           {% endcall %}
           -- Exchange tables
           {% do exchange_tables_atomic(old_relation, target_relation) %}
@@ -111,8 +111,7 @@
     {% endif %}
   {% endif %}
 
-  {% if not is_atomic or existing_relation is none or inserts_only or unique_key is none %}
-    -- atomic calls insert before exchange, so we skip it here
+  {% if build_sql %}
     {% call statement('main') %}
         {{ build_sql }}
     {% endcall %}
