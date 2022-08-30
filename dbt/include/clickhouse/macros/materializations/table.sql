@@ -1,23 +1,36 @@
-{% materialization table, adapter='clickhouse' %}
+{% materialization table, default %}
+  {%- set identifier = model['alias'] -%}
+  {%- set tmp_identifier = model['name'] + '__dbt_tmp' -%}
+  {%- set backup_identifier = model['name'] + '__dbt_backup' -%}
 
-  {% set is_atomic = is_engine_atomic(this) %}
-
-  {%- set existing_relation = load_cached_relation(this) -%}
-  {%- set target_relation = this.incorporate(type='table') %}
-  {%- set intermediate_relation =  make_intermediate_relation(target_relation) -%}
+  {%- set old_relation = adapter.get_relation(database=database, schema=schema, identifier=identifier) -%}
+  {%- set target_relation = api.Relation.create(identifier=identifier,
+                                                schema=schema,
+                                                database=database,
+                                                type='table') -%}
+  {%- set intermediate_relation = api.Relation.create(identifier=tmp_identifier,
+                                                      schema=schema,
+                                                      database=database,
+                                                      type='table') -%}
   -- the intermediate_relation should not already exist in the database; get_relation
   -- will return None in that case. Otherwise, we get a relation that we can drop
   -- later, before we try to use this name for the current operation
-  {%- set preexisting_intermediate_relation = load_cached_relation(intermediate_relation) -%}
+  {%- set preexisting_intermediate_relation = adapter.get_relation(identifier=tmp_identifier,
+                                                                   schema=schema,
+                                                                   database=database) -%}
   /*
       See ../view/view.sql for more information about this relation.
   */
-  {%- set backup_relation_type = 'table' if existing_relation is none else existing_relation.type -%}
-  {%- set backup_relation = make_backup_relation(target_relation, backup_relation_type) -%}
+  {%- set backup_relation_type = 'table' if old_relation is none else old_relation.type -%}
+  {%- set backup_relation = api.Relation.create(identifier=backup_identifier,
+                                                schema=schema,
+                                                database=database,
+                                                type=backup_relation_type) -%}
   -- as above, the backup_relation should not already exist
-  {%- set preexisting_backup_relation = load_cached_relation(backup_relation) -%}
-  -- grab current tables grants config for comparision later on
-  {% set grant_config = config.get('grants') %}
+  {%- set preexisting_backup_relation = adapter.get_relation(identifier=backup_identifier,
+                                                             schema=schema,
+                                                             database=database) -%}
+
 
   -- drop the temp relations if they exist already in the database
   {{ drop_relation_if_exists(preexisting_intermediate_relation) }}
@@ -34,14 +47,14 @@
   {%- endcall %}
 
   -- cleanup
-  {% if is_atomic and existing_relation is not none %}
+  {% if is_atomic and old_relation is not none %}
     -- only makes sense to EXCHANGE when the relation already exists
-    {% do exchange_tables_atomic(intermediate_relation, existing_relation) %}
+    {% do exchange_tables_atomic(intermediate_relation, old_relation) %}
 
   {% else %}
-    
-    {% if existing_relation is not none %}
-        {{ adapter.rename_relation(existing_relation, backup_relation) }}
+
+    {% if old_relation is not none %}
+        {{ adapter.rename_relation(old_relation, backup_relation) }}
     {% endif %}
 
     {{ adapter.rename_relation(intermediate_relation, target_relation) }}
@@ -51,9 +64,6 @@
   {% do create_indexes(target_relation) %}
 
   {{ run_hooks(post_hooks, inside_transaction=True) }}
-
-  {% set should_revoke = should_revoke(existing_relation, full_refresh_mode=True) %}
-  {% do apply_grants(target_relation, grant_config, should_revoke=should_revoke) %}
 
   {% do persist_docs(target_relation, model) %}
 
