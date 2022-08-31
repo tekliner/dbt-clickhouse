@@ -170,11 +170,17 @@
     where {{ source }}.dbt_change_type IN ('insert');
   {% endcall %}
 
-  {% call statement('drop_target_relation') %}
-    drop table if exists {{ target }}
-  {% endcall %}
+  {% set existing_relation = load_relation(target) %}
 
-  {% call statement('rename_upsert_relation') %}
-    rename table {{ upsert }} to {{ target }}
-  {% endcall %}
+  {% if existing_relation is not none and is_engine_atomic(existing_relation) %}
+
+    {% do exchange_tables_atomic(upsert, target) %}
+    {% do adapter.drop_relation(upsert) %}
+
+  {% else %}
+
+    {% do adapter.rename_relation(upsert, target) %} 
+
+  {% endif %}
+
 {% endmacro %}
