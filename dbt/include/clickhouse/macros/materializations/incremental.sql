@@ -47,10 +47,7 @@
       {% set tmp_identifier = model['name'] + '__dbt_tmp' %}
       {% set backup_identifier = model['name'] + '__dbt_backup' %}
       {% set intermediate_relation = existing_relation.incorporate(path={"identifier": tmp_identifier}) %}
-      {% if not is_atomic %}
-        {% set backup_relation = existing_relation.incorporate(path={"identifier": backup_identifier}) %}
-        {% do to_drop.append(backup_relation) %}
-      {% endif %}
+      {% set backup_relation = existing_relation.incorporate(path={"identifier": backup_identifier}) %}
 
       {% set build_sql = create_table_as(False, intermediate_relation, sql) %}
       {% set need_swap = true %}
@@ -119,11 +116,13 @@
 
   {% if need_swap %} 
       {% if is_atomic %}
-        {% do exchange_tables_atomic(intermediate_relation, target_relation) %}
+        {% do adapter.rename_relation(intermediate_relation, backup_relation) %} 
+        {% do exchange_tables_atomic(backup_relation, target_relation) %}
       {% else %}
         {% do adapter.rename_relation(target_relation, backup_relation) %} 
-        {% do adapter.rename_relation(intermediate_relation, target_relation) %} 
+        {% do adapter.rename_relation(intermediate_relation, target_relation) %}
       {% endif %}
+      {% do to_drop.append(backup_relation) %}
   {% endif %}
 
   {% do persist_docs(target_relation, model) %}

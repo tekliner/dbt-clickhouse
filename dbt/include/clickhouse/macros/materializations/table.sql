@@ -41,20 +41,26 @@
   -- `BEGIN` happens here:
   {{ run_hooks(pre_hooks, inside_transaction=True) }}
 
-  -- build model
-  {% call statement('main') -%}
-    {{ get_create_table_as_sql(False, intermediate_relation, sql) }}
-  {%- endcall %}
-
-  -- cleanup
   {% if is_atomic and old_relation is not none %}
     -- only makes sense to EXCHANGE when the relation already exists
-    {% do exchange_tables_atomic(intermediate_relation, old_relation) %}
+
+    -- build model as backup_relation so it is saved after EXCHANGE
+    {% call statement('main') -%}
+      {{ get_create_table_as_sql(False, backup_relation, sql) }}
+    {%- endcall %}
+
+    {% do exchange_tables_atomic(backup_relation, old_relation) %}
 
   {% else %}
 
+    -- build model
+    {% call statement('main') -%}
+      {{ get_create_table_as_sql(False, intermediate_relation, sql) }}
+    {%- endcall %}
+
+    -- cleanup, move the existing table out of the way and rename intermediate to target
     {% if old_relation is not none %}
-        {{ adapter.rename_relation(old_relation, backup_relation) }}
+      {{ adapter.rename_relation(old_relation, backup_relation) }}
     {% endif %}
 
     {{ adapter.rename_relation(intermediate_relation, target_relation) }}
