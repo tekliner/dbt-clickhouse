@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from enum import StrEnum
 
 import dbt.exceptions
 from dbt.adapters.base.relation import BaseRelation, Policy
+from dbt.dataclass_schema import StrEnum
 
 
 @dataclass
