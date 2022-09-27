@@ -85,7 +85,7 @@
 
     {% if temporary -%}
         create temporary table {{ relation.name }}
-        engine = Memory
+        engine Memory
         {{ order_cols(label="order by") }}
         {{ partition_cols(label="partition by") }}
     {%- else %}
@@ -137,14 +137,24 @@
 {% macro clickhouse__list_relations_without_caching(schema_relation) %}
   {% call statement('list_relations_without_caching', fetch_result=True) -%}
     select
-      null as db,
-      name as name,
-      database as schema,
-      if(engine not in ('MaterializedView', 'View'), 'table', 'view') as type
-    from system.tables as t
+      t.name as name,
+      t.database as schema,
+      if(engine not in ('MaterializedView', 'View'), 'table', 'view') as type,
+      db.engine as db_engine,
+      t.engine as table_engine
+    from system.tables as t JOIN system.databases as db on t.database = db.name
     where schema = '{{ schema_relation.schema }}'
   {% endcall %}
   {{ return(load_result('list_relations_without_caching').table) }}
+{% endmacro %}
+
+{% macro clickhouse__get_database(database) %}
+    {% call statement('get_database', fetch_result=True) %}
+        select name, engine, comment
+        from system.databases
+        where name = '{{ database }}'
+   {% endcall %}
+   {% do return(load_result('get_database').table) %}
 {% endmacro %}
 
 {% macro clickhouse__get_columns_in_relation(relation) -%}
@@ -166,7 +176,7 @@
 
 {% macro clickhouse__drop_relation(relation) -%}
   {% call statement('drop_relation', auto_begin=False) -%}
-    drop table if exists {{ relation }} {{ on_cluster_clause(label="on cluster") }}
+    drop {{ relation.drop_type }} if exists {{ relation }} {{ on_cluster_clause(label="on cluster") }}
   {%- endcall %}
 {% endmacro %}
 

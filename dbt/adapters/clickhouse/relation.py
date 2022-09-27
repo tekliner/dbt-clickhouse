@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from enum import StrEnum
 
 import dbt.exceptions
 from dbt.adapters.base.relation import BaseRelation, Policy
@@ -18,11 +19,19 @@ class ClickhouseIncludePolicy(Policy):
     identifier: bool = True
 
 
+class ClickHouseRelationDropType(StrEnum):
+    Table = "table"
+    Dictionary = "dictionary"
+
+
 @dataclass(frozen=True, eq=False, repr=False)
 class ClickhouseRelation(BaseRelation):
     quote_policy: ClickhouseQuotePolicy = ClickhouseQuotePolicy()
     include_policy: ClickhouseIncludePolicy = ClickhouseIncludePolicy()
     quote_character: str = ""
+    can_exchange: bool = False
+    table_engine: str = ""
+    drop_type: str = ClickHouseRelationDropType.Table
 
     def __post_init__(self):
         if self.database != self.schema and self.database:
