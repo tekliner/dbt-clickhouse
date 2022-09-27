@@ -111,7 +111,7 @@ class ClickhouseAdapter(SQLAdapter):
             conn.handle.database = None
 
     def list_relations_without_caching(
-            self, schema_relation: ClickhouseRelation
+        self, schema_relation: ClickhouseRelation
     ) -> List[ClickhouseRelation]:
         kwargs = {'schema_relation': schema_relation}
         results = self.execute_macro('list_relations_without_caching', kwargs=kwargs)
@@ -143,7 +143,7 @@ class ClickhouseAdapter(SQLAdapter):
         return super().get_relation(database, schema, identifier)
 
     def parse_clickhouse_columns(
-            self, relation: ClickhouseRelation, raw_rows: List[agate.Row]
+        self, relation: ClickhouseRelation, raw_rows: List[agate.Row]
     ) -> List[ClickhouseColumn]:
         rows = [dict(zip(row._keys, row._values)) for row in raw_rows]
 
@@ -181,10 +181,10 @@ class ClickhouseAdapter(SQLAdapter):
         return catalogs, exceptions
 
     def _get_one_catalog(
-            self,
-            information_schema: InformationSchema,
-            schemas: Set[str],
-            manifest: Manifest,
+        self,
+        information_schema: InformationSchema,
+        schemas: Set[str],
+        manifest: Manifest,
     ) -> agate.Table:
         if len(schemas) != 1:
             dbt.exceptions.raise_compiler_error(
@@ -203,10 +203,10 @@ class ClickhouseAdapter(SQLAdapter):
         return table.where(_catalog_filter_schemas(manifest))
 
     def get_rows_different_sql(
-            self,
-            relation_a: ClickhouseRelation,
-            relation_b: ClickhouseRelation,
-            column_names: Optional[List[str]] = None,
+        self,
+        relation_a: ClickhouseRelation,
+        relation_b: ClickhouseRelation,
+        column_names: Optional[List[str]] = None,
     ) -> str:
         names: List[str]
         if column_names is None:
@@ -237,11 +237,11 @@ class ClickhouseAdapter(SQLAdapter):
         return sql
 
     def update_column_sql(
-            self,
-            dst_name: str,
-            dst_column: str,
-            clause: str,
-            where_clause: Optional[str] = None,
+        self,
+        dst_name: str,
+        dst_column: str,
+        clause: str,
+        where_clause: Optional[str] = None,
     ) -> str:
         clause = f'alter table {dst_name} update {dst_column} = {clause}'
         if where_clause is not None:
