@@ -143,7 +143,8 @@
       t.name as name,
       t.database as schema,
       if(engine not in ('MaterializedView', 'View'), 'table', 'view') as type,
-      db.engine as db_engine
+      db.engine as db_engine,
+      t.engine as table_engine
     from system.tables as t JOIN system.databases as db on t.database = db.name
     where schema = '{{ schema_relation.schema }}'
   {% endcall %}
@@ -169,7 +170,7 @@
 
 {% macro clickhouse__drop_relation(relation) -%}
   {% call statement('drop_relation', auto_begin=False) -%}
-    drop table if exists {{ relation }} {{ on_cluster_clause(label="on cluster") }}
+    drop {{ relation.drop_type }} if exists {{ relation }} {{ on_cluster_clause(label="on cluster") }}
   {%- endcall %}
 {% endmacro %}
 

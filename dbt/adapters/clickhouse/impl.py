@@ -97,7 +97,7 @@ class ClickHouseAdapter(SQLAdapter):
 
     @available
     def can_exchange(self, schema: str, rel_type: str) -> bool:
-        if rel_type != 'table' or not schema or not self.supports_atomic_exchange():
+        if not schema or not self.supports_atomic_exchange():
             return False
         ch_db = self.get_ch_database(schema)
         return ch_db and ch_db.engine in ('Atomic', 'Replicated')
@@ -121,19 +121,19 @@ class ClickHouseAdapter(SQLAdapter):
 
         relations = []
         for row in results:
-            name, schema, type_info, db_engine = row
+            name, schema, type_info, db_engine, table_engine = row
             rel_type = RelationType.View if 'view' in type_info else RelationType.Table
-            can_exchange = (
-                conn_supports_exchange
-                and rel_type == RelationType.Table
-                and db_engine in ('Atomic', 'Replicated')
-            )
+            can_exchange = conn_supports_exchange and db_engine in ('Atomic', 'Replicated')
             relation = self.Relation.create(
                 database=None,
                 schema=schema,
                 identifier=name,
                 type=rel_type,
                 can_exchange=can_exchange,
+                table_engine=table_engine,
+                drop_type=ClickHouseRelationDropType.Dictionary
+                if table_engine == "Dictionary"
+                else ClickHouseRelationDropType.Table,
             )
             relations.append(relation)
 

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import dbt.exceptions
 from dbt.adapters.base.relation import BaseRelation, Policy
+from dbt.dataclass_schema import StrEnum
 
 
 @dataclass
@@ -18,12 +19,19 @@ class ClickHouseIncludePolicy(Policy):
     identifier: bool = True
 
 
+class ClickHouseRelationDropType(StrEnum):
+    Table = "table"
+    Dictionary = "dictionary"
+
+
 @dataclass(frozen=True, eq=False, repr=False)
 class ClickHouseRelation(BaseRelation):
     quote_policy: ClickHouseQuotePolicy = ClickHouseQuotePolicy()
     include_policy: ClickHouseIncludePolicy = ClickHouseIncludePolicy()
     quote_character: str = ''
     can_exchange: bool = False
+    table_engine: str = ""
+    drop_type: str = ClickHouseRelationDropType.Table
 
     def __post_init__(self):
         if self.database != self.schema and self.database:
