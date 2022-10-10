@@ -18,7 +18,7 @@ from dbt.utils import executor
 
 from dbt.adapters.clickhouse.column import ClickHouseColumn
 from dbt.adapters.clickhouse.connections import ClickHouseConnectionManager
-from dbt.adapters.clickhouse.relation import ClickHouseRelation
+from dbt.adapters.clickhouse.relation import ClickHouseRelation, ClickHouseRelationDropType
 
 GET_CATALOG_MACRO_NAME = 'get_catalog'
 LIST_SCHEMAS_MACRO_NAME = 'list_schemas'
