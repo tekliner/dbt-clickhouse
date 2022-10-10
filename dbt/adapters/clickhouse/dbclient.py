@@ -124,23 +124,9 @@ class ChClientWrapper(ABC):
             db_engine = self.command('SELECT engine FROM system.databases WHERE name = database()')
             if db_engine not in ('Atomic', 'Replicated'):
                 return False
-            create_cmd = (
-                'CREATE TABLE IF NOT EXISTS {} (test String) ENGINE MergeTree() ORDER BY tuple()'
-            )
-            swap_tables = [f'__dbt_exchange_test_{x}' for x in range(0, 2)]
-            for table in swap_tables:
-                self.command(create_cmd.format(table))
-            try:
-                self.command('EXCHANGE TABLES {} AND {}'.format(*swap_tables))
-                return True
-            except DBTDatabaseException as ex:
-                logger.info(f'ClickHouse server does not support exchange tables {ex}')
-            finally:
-                try:
-                    for table in swap_tables:
-                        self.command(f'DROP TABLE IF EXISTS {table}')
-                except DBTDatabaseException:
-                    logger.info('Unexpected server exception dropping table', exc_info=True)
+            return True
+
         except DBTDatabaseException:
             logger.warning('Failed to run exchange test', exc_info=True)
+
         return False
