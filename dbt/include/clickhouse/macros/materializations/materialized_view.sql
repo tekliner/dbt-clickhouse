@@ -9,12 +9,12 @@
     {% set target_mv_table = config.require('target_mv_table') %}
 
     {% set target_matview = this %}
-    {% set existing_matview = load_relation(this) %}
+    {% set existing_matview = load_cached_relation(this) %}
 
     {% set mv_target_relation_exists, mv_target_relation = get_or_create_relation(database=this.database,schema=this.schema,identifier=target_mv_table, type='table') -%}
-    {% set existing_mv_target = load_relation(mv_target_relation) %}
+    {% set existing_mv_target = load_cached_relation(mv_target_relation) %}
 
-    {% set tmp_relation = make_temp_relation(mv_target_relation) %}
+    {% set tmp_relation = make_intermediate_relation(mv_target_relation) %}
     {% do drop_relation_if_exists(tmp_relation) %}
 
     {{ run_hooks(pre_hooks, inside_transaction=False) }}

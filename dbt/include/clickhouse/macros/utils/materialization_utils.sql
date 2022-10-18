@@ -18,7 +18,7 @@
 
 
 {% macro materialize_table(_this, sql) %}
-    {%- set existing_relation = load_relation(_this) -%}
+    {%- set existing_relation = load_cached_relation(_this) -%}
     {%- set target_relation = _this.incorporate(type='table') -%}
     {%- set backup_relation = none -%}
     {%- set preexisting_backup_relation = none -%}
@@ -27,19 +27,16 @@
     {% if existing_relation is not none %}
         {%- set backup_relation_type = existing_relation.type -%}
         {%- set backup_relation = make_backup_relation(target_relation, backup_relation_type) -%}
-        {%- set preexisting_backup_relation = load_relation(backup_relation) -%}
+        {%- set preexisting_backup_relation = load_cached_relation(backup_relation) -%}
         {% if not existing_relation.can_exchange %}
-            {%- set intermediate_relation = make_temp_relation(target_relation) -%}
-            {%- set preexisting_intermediate_relation = load_relation(intermediate_relation) -%}
+            {%- set intermediate_relation = make_intermediate_relation(target_relation) -%}
+            {%- set preexisting_intermediate_relation = load_cached_relation(intermediate_relation) -%}
         {% endif %}
     {% endif %}
 
     -- drop the temp relations if they exist already in the database
     {{ drop_relation_if_exists(preexisting_intermediate_relation) }}
     {{ drop_relation_if_exists(preexisting_backup_relation) }}
-
-    -- `BEGIN` happens here:
-    {{ run_hooks(pre_hooks, inside_transaction=True) }}
 
     {% if backup_relation is none %}
         {{ log('Creating new relation ' + target_relation.name )}}
@@ -69,7 +66,7 @@
 
 
 {% macro materialize_matview(_this, mv_target_relation, sql) %}
-    {%- set existing_relation = load_relation(_this) -%}
+    {%- set existing_relation = load_cached_relation(_this) -%}
     {%- set target_relation = _this.incorporate(type='table') -%}
     {%- set backup_relation = none -%}
     {%- set preexisting_backup_relation = none -%}
@@ -78,19 +75,16 @@
     {% if existing_relation is not none %}
         {%- set backup_relation_type = existing_relation.type -%}
         {%- set backup_relation = make_backup_relation(target_relation, backup_relation_type) -%}
-        {%- set preexisting_backup_relation = load_relation(backup_relation) -%}
+        {%- set preexisting_backup_relation = load_cached_relation(backup_relation) -%}
         {% if not existing_relation.can_exchange %}
-            {%- set intermediate_relation = make_temp_relation(target_relation) -%}
-            {%- set preexisting_intermediate_relation = load_relation(intermediate_relation) -%}
+            {%- set intermediate_relation = make_intermediate_relation(target_relation) -%}
+            {%- set preexisting_intermediate_relation = load_cached_relation(intermediate_relation) -%}
         {% endif %}
     {% endif %}
 
     -- drop the temp relations if they exist already in the database
     {{ drop_relation_if_exists(preexisting_intermediate_relation) }}
     {{ drop_relation_if_exists(preexisting_backup_relation) }}
-
-    -- `BEGIN` happens here:
-    {{ run_hooks(pre_hooks, inside_transaction=True) }}
 
     {% if backup_relation is none %}
         {{ log('Creating new relation ' + target_relation.name )}}
