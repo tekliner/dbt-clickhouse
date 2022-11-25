@@ -5,16 +5,17 @@
 {% endmacro %}
 
 
+
 {% materialization materialized_view, adapter='clickhouse' -%}
-    {% set target_mv_table = config.require('target_mv_table') %}
+    {% set target_table_exists, target_table = get_or_create_relation(database=this.database, schema=this.schema, identifier=this.identifier, type='table') -%}
+    {% set existing_target_table = load_cached_relation(target_table) %}
 
-    {% set target_matview = this %}
-    {% set existing_matview = load_cached_relation(this) %}
+	{% set prefix ='_mv_' %}
+	{% set mv_identifier = prefix ~ this.identifier %}
+    {% set target_matview = this.incorporate(path={"identifier": mv_identifier}) %}
+    {% set existing_matview = load_cached_relation(target_matview) %}
 
-    {% set mv_target_relation_exists, mv_target_relation = get_or_create_relation(database=this.database,schema=this.schema,identifier=target_mv_table, type='table') -%}
-    {% set existing_mv_target = load_cached_relation(mv_target_relation) %}
-
-    {% set tmp_relation = make_intermediate_relation(mv_target_relation) %}
+    {% set tmp_relation = make_intermediate_relation(target_table) %}
     {% do drop_relation_if_exists(tmp_relation) %}
 
     {{ run_hooks(pre_hooks, inside_transaction=False) }}
@@ -27,15 +28,15 @@
     {% if existing_matview is not none %}
         -- проверяем консистентность если матвьюха  существует
         {% set schema_changes_dict = check_for_schema_changes(tmp_relation, existing_matview) %}
-        {% if schema_changes_dict['schema_changed'] or existing_mv_target is none %}
+        {% if schema_changes_dict['schema_changed'] or existing_target_table is none %}
             {% set full_rebuild = True %}
         {% endif %}
 
     {% else %}
         -- матвьюхи нет, нужно создать
-        {% if existing_mv_target is not none %}
+        {% if existing_target_table is not none %}
             -- таргет есть, проверяем консистентность
-            {% set schema_changes_dict = check_for_schema_changes(tmp_relation, existing_mv_target) %}
+            {% set schema_changes_dict = check_for_schema_changes(tmp_relation, existing_target_table) %}
             {% if schema_changes_dict['schema_changed'] %}
                 -- неконсистентен, пересоздаём всё
                 {% set full_rebuild = True %}
@@ -51,11 +52,11 @@
     {% endif %}
 
     {% if full_rebuild %}
-        {% do materialize_table(mv_target_relation, sql) %}
+        {% do materialize_table(target_table, sql) %}
     {% endif %}
 
     {% if full_rebuild or create_matview %}
-        {% do materialize_matview(target_matview, mv_target_relation, sql) %}
+        {% do materialize_matview(target_matview, target_table, sql) %}
 
         {{ run_hooks(post_hooks, inside_transaction=True) }}
 
