@@ -65,9 +65,9 @@
   {%- endif %}
 {%- endmacro -%}
 
-{% macro clickhouse__create_table_as(temporary, relation, sql) -%}
+{% macro clickhouse__create_table_as(temporary, relation, sql, force_skip_insert) -%}
     {% set create_table = create_table_or_empty(temporary, relation, sql) %}
-    {% if adapter.is_before_version('22.7.1') -%}
+    {% if adapter.is_before_version('22.7.1') or force_skip_insert -%}
         {{ create_table }}
     {%- else %}
         {% call statement('create_table_empty') %}

@@ -10,7 +10,7 @@
     {% endset %}
 
     {% call statement('tmp_relation_table') -%}
-        {{ create_table_as(True, relation, wrapped_sql)  }}
+        {{ create_table_as(True, relation, wrapped_sql, True)  }}
     {%- endcall %}
 
     {{ return(relation) }}
