@@ -9,17 +9,21 @@ from dbt.adapters.clickhouse.dbclient import ChClientWrapper, ChRetryableExcepti
 
 class ChNativeClient(ChClientWrapper):
     def query(self, sql, **kwargs):
+        print(1, sql)
         try:
             return NativeClientResult(self._client.execute(sql, with_column_types=True, **kwargs))
         except clickhouse_driver.errors.Error as ex:
+            print(1, ex)
             raise DBTDatabaseException(str(ex).strip()) from ex
 
     def command(self, sql, **kwargs):
         try:
+            print(2, sql)
             result = self._client.execute(sql, **kwargs)
             if len(result) and len(result[0]):
                 return result[0][0]
         except clickhouse_driver.errors.Error as ex:
+            print(2, ex)
             raise DBTDatabaseException(str(ex).strip()) from ex
 
     def close(self):
