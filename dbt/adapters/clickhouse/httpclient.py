@@ -7,23 +7,35 @@ from dbt.version import __version__ as dbt_version
 
 from dbt.adapters.clickhouse.dbclient import ChClientWrapper, ChRetryableException
 
+DBT_MAX_RETRY_COUNT = 3
+
 
 class ChHttpClient(ChClientWrapper):
     def query(self, sql, **kwargs):
-        print(1, sql)
-        try:
-            return self._client.query(sql, **kwargs)
-        except DatabaseError as ex:
-            print(1, ex)
-            raise DBTDatabaseException(str(ex).strip()) from ex
+        retry_count = 0
+        while retry_count < DBT_MAX_RETRY_COUNT:
+            try:
+                return self._client.query(sql, **kwargs)
+            except DatabaseError as ex:
+                if retry_count < DBT_MAX_RETRY_COUNT:
+                    retry_count += 1
+                    self._log_retry_exc(ex, retry_count, DBT_MAX_RETRY_COUNT)
+                    continue
+
+                raise DBTDatabaseException(str(ex).strip()) from ex
 
     def command(self, sql, **kwargs):
-        try:
-            print(2, sql)
-            return self._client.command(sql, **kwargs)
-        except DatabaseError as ex:
-            print(2, ex)
-            raise DBTDatabaseException(str(ex).strip()) from ex
+        retry_count = 0
+        while retry_count < DBT_MAX_RETRY_COUNT:
+            try:
+                return self._client.command(sql, **kwargs)
+            except DatabaseError as ex:
+                if retry_count < DBT_MAX_RETRY_COUNT:
+                    retry_count += 1
+                    self._log_retry_exc(ex, retry_count, DBT_MAX_RETRY_COUNT)
+                    continue
+
+                raise DBTDatabaseException(str(ex).strip()) from ex
 
     def database_dropped(self, database: str):
         # This is necessary for the http client to avoid exceptions when ClickHouse doesn't recognize the database

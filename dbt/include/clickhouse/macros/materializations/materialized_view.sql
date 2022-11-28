@@ -24,6 +24,7 @@
 
     {% set to_drop = [] %}
     {% do create_temporary_empty_table(tmp_relation, sql) %}
+    {{ to_drop.append(tmp_relation) }}
 
     {% if existing_matview is not none %}
         -- проверяем консистентность если матвьюха  существует

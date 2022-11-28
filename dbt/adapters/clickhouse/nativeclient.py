@@ -6,25 +6,35 @@ from dbt.version import __version__ as dbt_version
 from dbt.adapters.clickhouse import ClickHouseCredentials
 from dbt.adapters.clickhouse.dbclient import ChClientWrapper, ChRetryableException
 
+DBT_MAX_RETRY_COUNT = 3
+
 
 class ChNativeClient(ChClientWrapper):
     def query(self, sql, **kwargs):
-        print(1, sql)
-        try:
-            return NativeClientResult(self._client.execute(sql, with_column_types=True, **kwargs))
-        except clickhouse_driver.errors.Error as ex:
-            print(1, ex)
-            raise DBTDatabaseException(str(ex).strip()) from ex
+        retry_count = 0
+        while retry_count < DBT_MAX_RETRY_COUNT:
+            try:
+                return NativeClientResult(self._client.execute(sql, with_column_types=True, **kwargs))
+            except clickhouse_driver.errors.Error as ex:
+                if retry_count < DBT_MAX_RETRY_COUNT:
+                    retry_count += 1
+                    self._log_retry_exc(ex, retry_count, DBT_MAX_RETRY_COUNT)
+                    continue
+                raise DBTDatabaseException(str(ex).strip()) from ex
 
     def command(self, sql, **kwargs):
-        try:
-            print(2, sql)
-            result = self._client.execute(sql, **kwargs)
-            if len(result) and len(result[0]):
-                return result[0][0]
-        except clickhouse_driver.errors.Error as ex:
-            print(2, ex)
-            raise DBTDatabaseException(str(ex).strip()) from ex
+        retry_count = 0
+        while retry_count < DBT_MAX_RETRY_COUNT:
+            try:
+                result = self._client.execute(sql, **kwargs)
+                if len(result) and len(result[0]):
+                    return result[0][0]
+            except clickhouse_driver.errors.Error as ex:
+                if retry_count < DBT_MAX_RETRY_COUNT:
+                    retry_count += 1
+                    self._log_retry_exc(ex, retry_count, DBT_MAX_RETRY_COUNT)
+                    continue
+                raise DBTDatabaseException(str(ex).strip()) from ex
 
     def close(self):
         self._client.disconnect()
