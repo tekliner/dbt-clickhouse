@@ -31,6 +31,7 @@
         {% if schema_changes_dict['schema_changed'] or existing_target_table is none %}
             {% set full_rebuild = True %}
         {% endif %}
+        {% do log("MV exists, schema_changed=" ~ schema_changes_dict['schema_changed'] ~ ", existing_target_table=" ~ existing_target_table, True) %}
 
     {% else %}
         -- матвьюхи нет, нужно создать
@@ -43,10 +44,12 @@
             {% endif %}
             -- если ребилд не нужен, создаем матвьюху потому что сейчас она none
             {% set create_matview = True %}
+            {% do log("target exists, schema_changed=" ~ schema_changes_dict['schema_changed'], True) %}
 
         {% else %}
             -- таргета нет, пересоздаём всё
             {% set full_rebuild = True %}
+            {% do log("target doesn't exist, full build", True) %}
         {% endif %}
 
     {% endif %}
@@ -76,6 +79,6 @@
 
     {{ run_hooks(post_hooks, inside_transaction=False) }}
 
-    {{ return({'relations': [target_matview]}) }}
+    {{ return({'relations': [target_table]}) }}
 
 {%- endmaterialization %}

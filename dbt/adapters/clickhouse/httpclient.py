@@ -10,15 +10,19 @@ from dbt.adapters.clickhouse.dbclient import ChClientWrapper, ChRetryableExcepti
 
 class ChHttpClient(ChClientWrapper):
     def query(self, sql, **kwargs):
+        print(1, sql)
         try:
             return self._client.query(sql, **kwargs)
         except DatabaseError as ex:
+            print(1, ex)
             raise DBTDatabaseException(str(ex).strip()) from ex
 
     def command(self, sql, **kwargs):
         try:
+            print(2, sql)
             return self._client.command(sql, **kwargs)
         except DatabaseError as ex:
+            print(2, ex)
             raise DBTDatabaseException(str(ex).strip()) from ex
 
     def database_dropped(self, database: str):
