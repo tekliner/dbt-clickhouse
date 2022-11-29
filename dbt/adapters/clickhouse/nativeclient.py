@@ -13,32 +13,18 @@ DBT_MAX_RETRY_COUNT = 3
 
 class ChNativeClient(ChClientWrapper):
     def query(self, sql, **kwargs):
-        retry_count = 0
-        while retry_count <= DBT_MAX_RETRY_COUNT:
-            try:
-                return NativeClientResult(self._client.execute(sql, with_column_types=True, **kwargs))
-            except clickhouse_driver.errors.Error as ex:
-                if retry_count < DBT_MAX_RETRY_COUNT:
-                    retry_count += 1
-                    time.sleep(5 * retry_count)
-                    continue
-
-                raise DBTDatabaseException(str(ex).strip()) from ex
+        try:
+            return NativeClientResult(self._client.execute(sql, with_column_types=True, **kwargs))
+        except clickhouse_driver.errors.Error as ex:
+            raise DBTDatabaseException(str(ex).strip()) from ex
 
     def command(self, sql, **kwargs):
-        retry_count = 0
-        while retry_count <= DBT_MAX_RETRY_COUNT:
-            try:
-                result = self._client.execute(sql, **kwargs)
-                if len(result) and len(result[0]):
-                    return result[0][0]
-            except clickhouse_driver.errors.Error as ex:
-                if retry_count < DBT_MAX_RETRY_COUNT:
-                    retry_count += 1
-                    time.sleep(5 * retry_count)
-                    continue
-
-                raise DBTDatabaseException(str(ex).strip()) from ex
+        try:
+            result = self._client.execute(sql, **kwargs)
+            if len(result) and len(result[0]):
+                return result[0][0]
+        except clickhouse_driver.errors.Error as ex:
+            raise DBTDatabaseException(str(ex).strip()) from ex
 
     def close(self):
         self._client.disconnect()
