@@ -1,3 +1,4 @@
+import time
 import uuid
 
 import clickhouse_connect
@@ -13,26 +14,26 @@ DBT_MAX_RETRY_COUNT = 3
 class ChHttpClient(ChClientWrapper):
     def query(self, sql, **kwargs):
         retry_count = 0
-        while retry_count < DBT_MAX_RETRY_COUNT:
+        while retry_count <= DBT_MAX_RETRY_COUNT:
             try:
                 return self._client.query(sql, **kwargs)
             except DatabaseError as ex:
                 if retry_count < DBT_MAX_RETRY_COUNT:
                     retry_count += 1
-                    # self._log_retry_exc(ex, retry_count, DBT_MAX_RETRY_COUNT)
+                    time.sleep(5 * retry_count)
                     continue
 
                 raise DBTDatabaseException(str(ex).strip()) from ex
 
     def command(self, sql, **kwargs):
         retry_count = 0
-        while retry_count < DBT_MAX_RETRY_COUNT:
+        while retry_count <= DBT_MAX_RETRY_COUNT:
             try:
                 return self._client.command(sql, **kwargs)
             except DatabaseError as ex:
                 if retry_count < DBT_MAX_RETRY_COUNT:
                     retry_count += 1
-                    # self._log_retry_exc(ex, retry_count, DBT_MAX_RETRY_COUNT)
+                    time.sleep(5 * retry_count)
                     continue
 
                 raise DBTDatabaseException(str(ex).strip()) from ex
