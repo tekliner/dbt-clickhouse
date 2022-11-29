@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-import logging
 
 from dbt.events import AdapterLogger
 from dbt.exceptions import DatabaseException as DBTDatabaseException, FailedToConnectException
@@ -98,9 +97,6 @@ class ChClientWrapper(ABC):
     @abstractmethod
     def _server_version(self):
         pass
-
-    def _log_retry_exc(self, ex, retry_count, max_retries=3):
-        logging.error(f'ClickHouse query failed with error: {ex}. Retrying... {retry_count} of {max_retries}')
 
     def _ensure_database(self, database_engine) -> None:
         if not self.database:

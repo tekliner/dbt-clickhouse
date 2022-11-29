@@ -19,7 +19,7 @@ class ChHttpClient(ChClientWrapper):
             except DatabaseError as ex:
                 if retry_count < DBT_MAX_RETRY_COUNT:
                     retry_count += 1
-                    self._log_retry_exc(ex, retry_count, DBT_MAX_RETRY_COUNT)
+                    # self._log_retry_exc(ex, retry_count, DBT_MAX_RETRY_COUNT)
                     continue
 
                 raise DBTDatabaseException(str(ex).strip()) from ex
@@ -32,7 +32,7 @@ class ChHttpClient(ChClientWrapper):
             except DatabaseError as ex:
                 if retry_count < DBT_MAX_RETRY_COUNT:
                     retry_count += 1
-                    self._log_retry_exc(ex, retry_count, DBT_MAX_RETRY_COUNT)
+                    # self._log_retry_exc(ex, retry_count, DBT_MAX_RETRY_COUNT)
                     continue
 
                 raise DBTDatabaseException(str(ex).strip()) from ex
