@@ -1,5 +1,3 @@
-import time
-
 import clickhouse_driver
 from clickhouse_driver.errors import NetworkError, SocketTimeoutError
 from dbt.exceptions import DatabaseException as DBTDatabaseException
@@ -7,8 +5,6 @@ from dbt.version import __version__ as dbt_version
 
 from dbt.adapters.clickhouse import ClickHouseCredentials
 from dbt.adapters.clickhouse.dbclient import ChClientWrapper, ChRetryableException
-
-DBT_MAX_RETRY_COUNT = 3
 
 
 class ChNativeClient(ChClientWrapper):

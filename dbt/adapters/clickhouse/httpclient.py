@@ -1,4 +1,3 @@
-import time
 import uuid
 
 import clickhouse_connect
@@ -7,8 +6,6 @@ from dbt.exceptions import DatabaseException as DBTDatabaseException
 from dbt.version import __version__ as dbt_version
 
 from dbt.adapters.clickhouse.dbclient import ChClientWrapper, ChRetryableException
-
-DBT_MAX_RETRY_COUNT = 3
 
 
 class ChHttpClient(ChClientWrapper):
