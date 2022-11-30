@@ -25,20 +25,20 @@
     {% set target_relation = this.incorporate(type='table', table_engine="Dictionary", drop_type="dictionary") %}
     {% set existing_relation = load_cached_relation(target_relation) %}
 
-    {% set intermediate_relation = make_intermediate_relation(target_relation)-%}
+    {% set intermediate_relation = make_intermediate_relation(target_relation) %}
 
-    {% set backup_relation_type = 'table' if existing_relation is none else existing_relation.type -%}
-    {% set backup_relation = make_backup_relation(target_relation, backup_relation_type) -%}
+    {% set backup_relation_type = 'table' if existing_relation is none else existing_relation.type %}
+    {% set backup_relation = make_backup_relation(target_relation, backup_relation_type) %}
 
     {% set existing_intermediate_relation = load_cached_relation(intermediate_relation) %}
-    {% if existing_intermediate_relation is not none %}
+    {% if existing_intermediate_relation %}
         {% do drop_relation_if_exists(existing_intermediate_relation) %}
     {% else %}
         {% do drop_relation_if_exists(intermediate_relation) %}
     {% endif %}
 
     {% set existing_backup_relation = load_cached_relation(backup_relation) %}
-    {% if existing_backup_relation is not none %}
+    {% if existing_backup_relation %}
         {% do drop_relation_if_exists(existing_backup_relation) %}
     {% else %}
         {% do drop_relation_if_exists(backup_relation) %}
@@ -109,7 +109,9 @@
 
     {% for rel in to_drop %}
         {% set rel_with_type = load_cached_relation(rel) %}
-        {% do adapter.drop_relation(rel_with_type) %}
+        {% if rel_with_type %}
+            adapter.drop_relation(rel_with_type)
+        {% endif %}
     {% endfor %}
 
     {{ run_hooks(post_hooks, inside_transaction=False) }}
