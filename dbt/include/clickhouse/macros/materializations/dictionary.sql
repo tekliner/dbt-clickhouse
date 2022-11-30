@@ -97,7 +97,8 @@
     {% do adapter.commit() %}
 
     {% for rel in to_drop %}
-        {% do adapter.drop_relation(rel) %}
+        {% set rel_with_type = load_cached_relation(rel) %}
+        {% do adapter.drop_relation(rel_with_type) %}
     {% endfor %}
 
     {{ run_hooks(post_hooks, inside_transaction=False) }}
