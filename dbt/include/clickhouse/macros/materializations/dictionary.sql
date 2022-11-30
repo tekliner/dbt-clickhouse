@@ -23,15 +23,26 @@
 
 {% materialization dictionary, adapter='clickhouse' %}
     {% set target_relation = this.incorporate(type='table', table_engine="Dictionary", drop_type="dictionary") %}
-    {% set existing_relation = load_cached_relation(target_relation) -%}
+    {% set existing_relation = load_cached_relation(target_relation) %}
 
     {% set intermediate_relation = make_intermediate_relation(target_relation)-%}
 
     {% set backup_relation_type = 'table' if existing_relation is none else existing_relation.type -%}
     {% set backup_relation = make_backup_relation(target_relation, backup_relation_type) -%}
 
-    {% do drop_relation_if_exists(intermediate_relation) %}
-    {% do drop_relation_if_exists(backup_relation) %}
+    {% set existing_intermediate_relation = load_cached_relation(intermediate_relation) %}
+    {% if existing_intermediate_relation is not none %}
+        {% do drop_relation_if_exists(existing_intermediate_relation) %}
+    {% else %}
+        {% do drop_relation_if_exists(intermediate_relation) %}
+    {% endif %}
+
+    {% set existing_backup_relation = load_cached_relation(backup_relation) %}
+    {% if existing_backup_relation is not none %}
+        {% do drop_relation_if_exists(existing_backup_relation) %}
+    {% else %}
+        {% do drop_relation_if_exists(backup_relation) %}
+    {% endif %}
 
     {{ run_hooks(pre_hooks, inside_transaction=False) }}
     -- `BEGIN` happens here:
