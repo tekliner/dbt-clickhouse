@@ -12,4 +12,4 @@ flake8==4.0.1
 types-requests==2.27.29
 agate~=1.6.3
 requests~=2.27.1
-setuptools~=65.3.0
+setuptools>=65.5.1
