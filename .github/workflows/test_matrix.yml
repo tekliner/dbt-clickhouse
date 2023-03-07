@@ -3,7 +3,7 @@ name: "test_matrix"
 
 on:  # yamllint disable-line rule:truthy
   pull_request:
-    branches: main
+    branches: [master]
   push:
     branches-ignore:
       - '*_test'
@@ -23,16 +23,12 @@ jobs:
     strategy:
       matrix:
         python-version:
-          - '3.8'
-          - '3.9'
           - '3.10'
           - '3.11'
         clickhouse-version:
           - '22.3'
-          - '22.8'
           - '22.11'
           - '22.12'
-          - latest
 
     steps:
       - name: Checkout

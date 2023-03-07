@@ -19,7 +19,7 @@ from dbt.utils import executor, filter_null_values
 from dbt.adapters.clickhouse.column import ClickHouseColumn
 from dbt.adapters.clickhouse.connections import ClickHouseConnectionManager
 from dbt.adapters.clickhouse.logger import logger
-from dbt.adapters.clickhouse.relation import ClickHouseRelation
+from dbt.adapters.clickhouse.relation import ClickHouseRelation, ClickHouseRelationDropType
 
 GET_CATALOG_MACRO_NAME = 'get_catalog'
 LIST_SCHEMAS_MACRO_NAME = 'list_schemas'
@@ -96,7 +96,7 @@ class ClickHouseAdapter(SQLAdapter):
 
     @available.parse_none
     def can_exchange(self, schema: str, rel_type: str) -> bool:
-        if rel_type != 'table' or not schema or not self.supports_atomic_exchange():
+        if not schema or not self.supports_atomic_exchange():
             return False
         ch_db = self.get_ch_database(schema)
         return ch_db and ch_db.engine in ('Atomic', 'Replicated')
@@ -192,12 +192,13 @@ class ClickHouseAdapter(SQLAdapter):
 
         relations = []
         for row in results:
-            name, schema, type_info, db_engine = row
+            name, schema, type_info, db_engine, table_engine = row
             rel_type = RelationType.View if 'view' in type_info else RelationType.Table
-            can_exchange = (
-                conn_supports_exchange
-                and rel_type == RelationType.Table
-                and db_engine in ('Atomic', 'Replicated')
+            can_exchange = conn_supports_exchange and db_engine in ('Atomic', 'Replicated')
+            drop_type = (
+                ClickHouseRelationDropType.Dictionary
+                if table_engine == "Dictionary"
+                else ClickHouseRelationDropType.Table
             )
             relation = self.Relation.create(
                 database=None,
@@ -205,6 +206,8 @@ class ClickHouseAdapter(SQLAdapter):
                 identifier=name,
                 type=rel_type,
                 can_exchange=can_exchange,
+                table_engine=table_engine,
+                drop_type=drop_type,
             )
             relations.append(relation)
 

@@ -36,7 +36,8 @@
       t.name as name,
       t.database as schema,
       if(engine not in ('MaterializedView', 'View'), 'table', 'view') as type,
-      db.engine as db_engine
+      db.engine as db_engine,
+      t.engine as table_engine
     from system.tables as t JOIN system.databases as db on t.database = db.name
     where schema = '{{ schema_relation.schema }}'
   {% endcall %}
@@ -55,17 +56,20 @@
 {% endmacro %}
 
 {% macro clickhouse__drop_relation(relation, obj_type='table') -%}
+  {% set drop_type = relation.drop_type or obj_type %}
   {% call statement('drop_relation', auto_begin=False) -%}
-    drop {{ obj_type }} if exists {{ relation }} {{ on_cluster_clause()}}
+    drop {{ drop_type }} if exists {{ relation }} {{ on_cluster_clause()}}
   {%- endcall %}
 {% endmacro %}
 
 {% macro clickhouse__rename_relation(from_relation, to_relation, obj_type='table') -%}
+  {% set drop_type_to = to_relation.drop_type or obj_type %}
+  {% set drop_type_from = from_relation.drop_type or obj_type %}
   {% call statement('drop_relation') %}
-    drop {{ obj_type }} if exists {{ to_relation }} {{ on_cluster_clause()}}
+    drop {{ drop_type_to }} if exists {{ to_relation }} {{ on_cluster_clause()}}
   {% endcall %}
   {% call statement('rename_relation') %}
-    rename {{ obj_type }} {{ from_relation }} to {{ to_relation }} {{ on_cluster_clause()}}
+    rename {{ drop_type_from }} {{ from_relation }} to {{ to_relation }} {{ on_cluster_clause()}}
   {% endcall %}
 {% endmacro %}
 
@@ -77,8 +81,7 @@
 
 {% macro clickhouse__make_temp_relation(base_relation, suffix) %}
   {% set tmp_identifier = base_relation.identifier ~ suffix %}
-  {% set tmp_relation = base_relation.incorporate(
-                              path={"identifier": tmp_identifier, "schema": None}) -%}
+  {% set tmp_relation = base_relation.incorporate(path={"identifier": tmp_identifier, "schema": None}) -%}
   {% do return(tmp_relation) %}
 {% endmacro %}
 
