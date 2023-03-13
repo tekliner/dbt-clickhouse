@@ -35,19 +35,22 @@ class ChHttpClient(ChClientWrapper):
 
     def _create_client(self, credentials):
         try:
+            conn_kwargs = {}
+            if credentials.compression:
+                conn_kwargs = {'compression': credentials.compression}
             return clickhouse_connect.get_client(
                 host=credentials.host,
                 port=credentials.port,
                 username=credentials.user,
                 password=credentials.password,
                 interface='https' if credentials.secure else 'http',
-                compress=False if credentials.compression == '' else bool(credentials.compression),
                 connect_timeout=credentials.connect_timeout,
                 send_receive_timeout=credentials.send_receive_timeout,
                 client_name=f'dbt/{dbt_version} dbt-clickhouse/{dbt_clickhouse_version}',
                 verify=credentials.verify,
                 query_limit=0,
                 settings=self._conn_settings,
+                **conn_kwargs
             )
         except OperationalError as ex:
             raise ChRetryableException(str(ex)) from ex
