@@ -32,6 +32,7 @@ class ClickHouseCredentials(Credentials):
     check_exchange: bool = True
     custom_settings: Optional[Dict[str, Any]] = None
     use_lw_deletes: bool = False
+    use_mutations_sync: bool = True
 
     @property
     def type(self):
@@ -72,4 +73,5 @@ class ClickHouseCredentials(Credentials):
             'check_exchange',
             'custom_settings',
             'use_lw_deletes',
+            'use_mutations_sync',
         )
