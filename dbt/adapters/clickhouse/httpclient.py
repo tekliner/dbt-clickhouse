@@ -50,7 +50,7 @@ class ChHttpClient(ChClientWrapper):
                 verify=credentials.verify,
                 query_limit=0,
                 settings=self._conn_settings,
-                **conn_kwargs
+                **conn_kwargs,
             )
         except OperationalError as ex:
             raise ChRetryableException(str(ex)) from ex
