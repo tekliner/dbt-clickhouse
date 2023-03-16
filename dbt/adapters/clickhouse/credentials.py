@@ -29,10 +29,10 @@ class ClickHouseCredentials(Credentials):
     sync_request_timeout: int = 5
     compress_block_size: int = 1048576
     compression: str = ''
-    check_exchange: bool = True
+    check_exchange: bool = False
     custom_settings: Optional[Dict[str, Any]] = None
     use_lw_deletes: bool = False
-    use_mutations_sync: bool = True
+    use_mutations_sync: bool = False
 
     @property
     def type(self):
