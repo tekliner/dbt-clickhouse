@@ -50,21 +50,23 @@
     {% endcall %}
 
   {% else %}
-    {% set schema_changes = none %}
+    {% set column_changes = none %}
     {% set incremental_strategy = adapter.calculate_incremental_strategy(config.get('incremental_strategy'))  %}
     {% set incremental_predicates = config.get('predicates', none) or config.get('incremental_predicates', none) %}
-    {% if on_schema_change != 'ignore' %}
-      {%- set schema_changes = check_for_schema_changes(existing_relation, target_relation) -%}
-      {% if schema_changes['schema_changed'] and incremental_strategy in ('append', 'delete_insert') %}
-        {% set incremental_strategy = 'legacy' %}
-        {% do log('Schema changes detected, switching to legacy incremental strategy') %}
+    {%- if on_schema_change != 'ignore' %}
+      {%- set column_changes = adapter.check_incremental_schema_changes(on_schema_change, existing_relation, sql) -%}
+      {%- if column_changes %}
+        {%- if incremental_strategy in ('append', 'delete_insert') %}
+          {% set incremental_strategy = 'legacy' %}
+          {{ log('Schema changes detected, switching to legacy incremental strategy') }}
+        {%- endif %}
       {% endif %}
     {% endif %}
     {% if incremental_strategy != 'delete_insert' and incremental_predicates %}
       {% do exceptions.raise_compiler_error('Cannot apply incremental predicates with ' + incremental_strategy + ' strategy.') %}
     {% endif %}
     {% if incremental_strategy == 'legacy' %}
-      {% do clickhouse__incremental_legacy(existing_relation, intermediate_relation, schema_changes, unique_key) %}
+      {% do clickhouse__incremental_legacy(existing_relation, intermediate_relation, column_changes, unique_key) %}
       {% set need_swap = true %}
     {% elif incremental_strategy == 'delete_insert' %}
       {% do clickhouse__incremental_delete_insert(existing_relation, unique_key, incremental_predicates) %}
@@ -109,95 +111,123 @@
 
 {%- endmaterialization %}
 
-
-{% macro process_schema_changes(on_schema_change, source_relation, target_relation) %}
-
-    {%- set schema_changes_dict = check_for_schema_changes(source_relation, target_relation) -%}
-    {% if not schema_changes_dict['schema_changed'] %}
-      {{ return }}
-    {% endif %}
-
-    {% if on_schema_change == 'fail' %}
-      {% set fail_msg %}
-          The source and target schemas on this incremental model are out of sync!
-          They can be reconciled in several ways:
-            - set the `on_schema_change` config to either append_new_columns or sync_all_columns, depending on your situation.
-            - Re-run the incremental model with `full_refresh: True` to update the target schema.
-            - update the schema manually and re-run the process.
-      {% endset %}
-      {% do exceptions.raise_compiler_error(fail_msg) %}
-      {{ return }}
-    {% endif %}
-
-    {% do sync_column_schemas(on_schema_change, target_relation, schema_changes_dict) %}
-
-{% endmacro %}
-
-
-{% macro clickhouse__incremental_legacy(existing_relation, intermediate_relation, on_schema_change, unique_key) %}
-    -- First create a temporary table for all of the new data
-    {% set new_data_relation = existing_relation.incorporate(path={"identifier": model['name'] + '__dbt_new_data'}) %}
+{% macro clickhouse__incremental_legacy(existing_relation, intermediate_relation, column_changes, unique_key, is_distributed=False) %}
+    {% set new_data_relation = existing_relation.incorporate(path={"identifier": existing_relation.identifier + '__dbt_new_data'}) %}
     {{ drop_relation_if_exists(new_data_relation) }}
-    {% call statement('create_new_data_temp') %}
+
+    {%- set inserted_relation = intermediate_relation -%}
+    {%- set inserting_relation = new_data_relation -%}
+
+    -- First create a temporary table for all of the new data
+    {% if is_distributed %}
+      {% if column_changes %}
+        {% do exceptions.raise_compiler_error('Schema changes not supported with Distributed tables ') %}
+      {% endif %}
+      -- Need to use distributed table to have data on all shards
+      {%- set distributed_new_data_relation = existing_relation.incorporate(path={"identifier": existing_relation.identifier + '__dbt_distributed_new_data'}) -%}
+      {%- set inserting_relation = distributed_new_data_relation -%}
+      {{ create_distributed_local_table(distributed_new_data_relation, new_data_relation, existing_relation, sql) }}
+    {% elif column_changes %}
+      {% call statement('create_new_data_temp') %}
         {{ get_create_table_as_sql(False, new_data_relation, sql) }}
-    {% endcall %}
+      {% endcall %}
+    {% else %}
+      {% call statement('create_new_data_temp') %}
+        {{ get_create_table_as_sql(False, new_data_relation, sql) }}
+      {% endcall %}
+    {% endif %}
 
     -- Next create another temporary table that will eventually be used to replace the existing table.  We can't
     -- use the table just created in the previous step because we don't want to override any updated rows with
     -- old rows when we insert the old data
-    {% call statement('main') %}
-       create table {{ intermediate_relation }} as {{ new_data_relation }}
-    {% endcall %}
+    {% if is_distributed %}
+      {%- set distributed_intermediate_relation = make_intermediate_relation(existing_relation) -%}
+      {%- set inserted_relation = distributed_intermediate_relation -%}
+      {{ create_distributed_local_table(distributed_intermediate_relation, intermediate_relation, existing_relation) }}
+    {% else %}
+      {% call statement('main') %}
+          create table {{ intermediate_relation }} {{ on_cluster_clause(existing_relation) }} as {{ new_data_relation }}
+      {% endcall %}
+    {% endif %}
 
     -- Insert all the existing rows into the new temporary table, ignoring any rows that have keys in the "new data"
     -- table.
-    {%- set dest_columns = adapter.get_columns_in_relation(existing_relation) -%}
-    {%- set dest_cols_csv = dest_columns | map(attribute='quoted') | join(', ') -%}
+    {%- set source_columns = adapter.get_columns_in_relation(existing_relation) -%}
+    {%- set source_columns_csv = source_columns | map(attribute='quoted') | join(', ') -%}
     {% call statement('insert_existing_data') %}
-        insert into {{ intermediate_relation }} ({{ dest_cols_csv }})
-        select {{ dest_cols_csv }}
+        insert into {{ inserted_relation }} ({{ source_columns_csv }})
+        select {{ source_columns_csv }}
         from {{ existing_relation }}
           where ({{ unique_key }}) not in (
             select {{ unique_key }}
-            from {{ new_data_relation }}
+            from {{ inserting_relation }}
           )
-       {{ adapter.get_model_settings(model) }}
+       {{ adapter.get_model_query_settings(model) }}
     {% endcall %}
 
     -- Insert all of the new data into the temporary table
+    {% if column_changes %}
+        {%- set dest_columns = adapter.get_columns_in_relation(new_data_relation) -%}
+        {%- set dest_columns_csv = dest_columns | map(attribute='quoted') | join(', ') -%}
+    {% else %}
+        {%- set dest_columns_csv = source_columns_csv %}
+    {% endif %}
     {% call statement('insert_new_data') %}
-     insert into {{ intermediate_relation }} ({{ dest_cols_csv }})
-        select {{ dest_cols_csv }}
-        from {{ new_data_relation }}
-      {{ adapter.get_model_settings(model) }}
+     insert into {{ inserted_relation }} ({{ dest_columns_csv }})
+        select {{ dest_columns_csv }}
+        from {{ inserting_relation }}
+      {{ adapter.get_model_query_settings(model) }}
     {% endcall %}
 
     {% do adapter.drop_relation(new_data_relation) %}
+    {% if is_distributed %}
+      {{ drop_relation_if_exists(distributed_new_data_relation) }}
+      {{ drop_relation_if_exists(distributed_intermediate_relation) }}
+    {% endif %}
 
 {% endmacro %}
 
 
-{% macro clickhouse__incremental_delete_insert(existing_relation, unique_key, incremental_predicates) %}
-    {% set new_data_relation = existing_relation.incorporate(path={"identifier": model['name']
+{% macro clickhouse__incremental_delete_insert(existing_relation, unique_key, incremental_predicates, is_distributed=False) %}
+    {% set new_data_relation = existing_relation.incorporate(path={"identifier": existing_relation.identifier
        + '__dbt_new_data_' + invocation_id.replace('-', '_')}) %}
     {{ drop_relation_if_exists(new_data_relation) }}
-    {% call statement('main') %}
+    {%- set distributed_new_data_relation = existing_relation.incorporate(path={"identifier": existing_relation.identifier + '__dbt_distributed_new_data'}) -%}
+
+    {%- set inserting_relation = new_data_relation -%}
+
+    {% if is_distributed %}
+      -- Need to use distributed table to have data on all shards
+      {%- set inserting_relation = distributed_new_data_relation -%}
+      {{ create_distributed_local_table(distributed_new_data_relation, new_data_relation, existing_relation, sql) }}
+    {% else %}
+      {% call statement('main') %}
         {{ get_create_table_as_sql(False, new_data_relation, sql) }}
-    {% endcall %}
+      {% endcall %}
+    {% endif %}
+
     {% call statement('delete_existing_data') %}
-      delete from {{ existing_relation }} where ({{ unique_key }}) in (select {{ unique_key }}
-                                          from {{ new_data_relation }})
+      {% if is_distributed %}
+          {%- set existing_local = existing_relation.derivative(adapter.get_clickhouse_local_suffix()) %}
+            delete from {{ existing_local }} {{ on_cluster_clause(existing_relation) }} where ({{ unique_key }}) in (select {{ unique_key }}
+                                          from {{ inserting_relation }})
+      {% else %}
+            delete from {{ existing_relation }} where ({{ unique_key }}) in (select {{ unique_key }}
+                                          from {{ inserting_relation }})
+      {% endif %}
       {%- if incremental_predicates %}
         {% for predicate in incremental_predicates %}
             and {{ predicate }}
         {% endfor %}
-      {%- endif -%};
+      {%- endif -%}
+      {{ adapter.get_model_query_settings(model) }}
     {% endcall %}
 
     {%- set dest_columns = adapter.get_columns_in_relation(existing_relation) -%}
     {%- set dest_cols_csv = dest_columns | map(attribute='quoted') | join(', ') -%}
     {% call statement('insert_new_data') %}
-        insert into {{ existing_relation}} select {{ dest_cols_csv}} from {{ new_data_relation }}
+        insert into {{ existing_relation }} {{ adapter.get_model_query_settings(model) }} select {{ dest_cols_csv }} from {{ inserting_relation }}
     {% endcall %}
     {% do adapter.drop_relation(new_data_relation) %}
+    {{ drop_relation_if_exists(distributed_new_data_relation) }}
 {% endmacro %}

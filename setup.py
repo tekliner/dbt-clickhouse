@@ -25,7 +25,7 @@ package_name = 'dbt-clickhouse'
 package_version = _dbt_clickhouse_version()
 description = '''The Clickhouse plugin for dbt (data build tool)'''
 
-dbt_version = '1.4.0'
+dbt_version = '1.7.0'
 dbt_minor = '.'.join(dbt_version.split('.')[0:2])
 
 if not package_version.startswith(dbt_minor):
@@ -55,10 +55,11 @@ setup(
     },
     install_requires=[
         f'dbt-core~={dbt_version}',
-        'clickhouse-connect>=0.5.24',
-        'clickhouse-driver>=0.2.3',
+        'clickhouse-connect>=0.6.22',
+        'clickhouse-driver>=0.2.6',
+        'setuptools>=0.69',
     ],
-    python_requires=">=3.7",
+    python_requires=">=3.8",
     platforms='any',
     classifiers=[
         'Development Status :: 5 - Production/Stable',
@@ -66,10 +67,10 @@ setup(
         'Operating System :: Microsoft :: Windows',
         'Operating System :: MacOS :: MacOS X',
         'Operating System :: POSIX :: Linux',
-        'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
     ],
 )

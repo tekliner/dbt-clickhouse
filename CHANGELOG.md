@@ -1,3 +1,184 @@
+### Release [1.7.6], 2024-04-12
+#### Bug Fix
+- A bug in (experimental) Distributed Table model creation could lead to errors when there was a change in the model definition (see, e.g.,
+https://github.com/ClickHouse/dbt-clickhouse/issues/226).  Thanks to [Thomas Schmidt](https://github.com/Somtom) for the Fix!
+- A comment at the end of a model would break the query used to retrieve the result column datatypes.  Thanks to [triou](https://github.com/tevariou)
+for the bug report and the fix.  Closes https://github.com/ClickHouse/dbt-clickhouse/issues/256
+
+#### Improvements
+- The new materialization for ClickHouse dictionaries now takes an optional "credentials dictionary" argument that overrides the
+global credentials values for user, password, database, host, and port (including removing any of those values by adding empty values if not needed).
+This allows better control over creating dictionaries on different server.  Thanks to [Cristhian Garcia](https://github.com/Ian2012)
+for the PR!
+- A new `ttl` setting has been added to model configuration that will insert the provided ClickHouse TTL expression in the appropriate place.
+Thanks to [Evan Rusackas](https://github.com/rusackas) for the contribution!
+- The Agate library should now be lazy loaded.  This should modestly improve dbt startup times (after dbt-clickhouse is upgraded to dbt 1.8.x).
+Thanks to [Daniel Reeves](https://github.com/dwreeves) for PR.
+
+### Release [1.7.5], 2024-04-02
+#### Bug Fixes
+- Requirements and tests upgraded to include Python 3.12.  Closes https://github.com/ClickHouse/dbt-clickhouse/issues/264
+- Model settings were not working correctly for custom materializations.  Thanks to original dbt-clickhouse [silentsokolov](https://github.com/silentsokolov)
+for the PR!
+
+### Release [1.7.4], 2024-03-23
+#### Improvement
+- Adds support for materializing ClickHouse dictionaries.  Thanks to [Rory Sawyer](https://github.com/SoryRawyer) for the contribution!
+See his excellent [tests](https://github.com/ClickHouse/dbt-clickhouse/blob/main/tests/integration/adapter/dictionary/test_dictionary.py) 
+for example usage.
+
+### Release [1.7.3], 2024-03-11
+#### Bug Fixes
+- Fixed an [issue](https://github.com/ClickHouse/dbt-clickhouse/issues/231) where passing settings to on view creation didn't work.
+- The `dbt test` command with a LIMIT clause were broken due to parsing error when having settings in the query ([issue](https://github.com/ClickHouse/dbt-clickhouse/issues/223)).
+We added a dedicated limit placer, that takes into account the settings section (using a comment flag `-- end_of_sql` within the query).
+
+### Release [1.7.2], 2024-02-09
+#### Bug Fix
+- Fixed an issue where Materialize Views would break with a custom schema.  Thanks to [Rory Sawyer](https://github.com/SoryRawyer)
+for the PR!
+
+### Release [1.7.1], 2023-12-13
+#### Bug Fixes
+- Some models with LIMIT clauses were broken in recent releases.  This has been fixed.  Thanks to
+[ptemarvelde](https://github.com/ptemarvelde) for the PR!
+- It was possible for incremental models with the delete+insert strategy to fail if ClickHouse "light weight deletes" were
+not enabled or the required setting `allow_nondetermistic_mutations` was not enabled and the user did not have permission
+to apply it.  This condition is now detected on startup, and an exception will be thrown if `use_lw_deletes` is configured
+in the profile.  Otherwise, a warning will be logged that incremental models will be slower (because such models will
+be downgraded to use the `legacy` incremental strategy).  This should prevent the confusing behavior in
+https://github.com/ClickHouse/dbt-clickhouse/issues/197 by throwing an early exception for an unsupported configuration.
+
+### Release [1.7.0], 2023-12-07
+#### Improvements
+- Minimal compatibility with dbt 1.7.x.  The date_spine macro and additional automated tests have not been implemented,
+but are planned for a future patch release.
+- DBT 1.7 introduces a (complex) optimization mechanism for retrieving a dbt catalog which is overkill for ClickHouse
+(which has no separate schema/database level), so this release includes some internal catalog changes to simplify that process.
+
+### Release [1.6.2], 2023-12-06
+#### Bug Fix
+- The dbt `on_schema_change` configuration value for incremental models was effectively being ignored.  This has been fixed
+with a very limited implementation.  Closes https://github.com/ClickHouse/dbt-clickhouse/issues/199.  Because of the way that
+ORDER BY/SORT BY/PARTITION BY/PRIMARY KEYS work in ClickHouse, plus the complexities of correctly transforming ClickHouse data types,
+`sync_all_columns` is not currently supported (although an implementation that works for non-key columns is theoretically possible,
+such an enhancement is not currently planned).  Accordingly, only `ignore`, `fail`, and `append_new_columns` values are supported
+for `on_schema_change`.  It is also not currently supported for Distributed tables.
+
+Note that actually appending new columns requires a fallback to the `legacy` incremental strategy, which is quite inefficient,
+so while theoretically possible, using `append_new_columns` is not recommended except for very small data volumes.
+
+### Release [1.6.1], 2023-12-04
+#### Bug Fixes
+- Identifier quoting was disabled for tables/databases etc.  This would cause failures for schemas or tables using reserved words
+or containing special characters.  This has been fixed and some macros have been updated to correctly handle such identifiers.
+Note that there still may be untested edge cases where nonstandard identifiers cause issues, so they are still not recommended.
+Closes https://github.com/ClickHouse/dbt-clickhouse/issues/144. Thanks to [Alexandru Pisarenco](https://github.com/apisarenco) for the
+report and initial PR!
+- The new `allow_automatic_deduplication` setting was not being correctly propagated to the adapter, so setting it to `True`
+did not have the intended affect.  In addition, this setting is now ignored for older ClickHouse versions that
+do not support `CREATE TABLE AS SELECT ... EMPTY`, since the automatic deduplication window is required to allow correct
+inserts in Replicated tables on those older versions.  Fixes https://github.com/ClickHouse/dbt-clickhouse/issues/216.
+
+### Release [1.6.0], 2023-11-30
+#### Improvements 
+- Compatible with dbt 1.6.x.  Note that dbt new `clone` feature is not supported, as ClickHouse has no native "light weight"
+clone functionality, and copying tables without actual data transfer is not possible in ClickHouse (barring file manipulation
+outside ClickHouse itself).
+- A new ClickHouse specific Materialized View materialization contributed by [Rory Sawyer](https://github.com/SoryRawyer).
+This creates a ClickHouse Materialized view using the `TO` form with the name `<model_name>_mv` and the associated target
+table `<model_name>`.  It's highly recommended to fully understand how ClickHouse materialized views work before using
+this materialization.
+
+### Release [1.5.2], 2023-11-28
+#### Bug Fixes
+- The `ON CLUSTER` clause was in the incorrect place for legacy incremental materializations.  This has been fixed.  Thanks to
+[Steven Reitsma](https://github.com/StevenReitsma) for the fix!
+- The `ON CLUSTER` DDL for drop tables did not include a SYNC modifier, which might be the cause of some "table already exists"
+errors.  The `SYNC` modifier has been added to the `on_cluster` macro when dropping relations.
+- Fixed a bug where using table settings such as `allow_nullable_key` would break "legacy" incremental materializations.  Closes
+https://github.com/ClickHouse/dbt-clickhouse/issues/209.  Also see the new model `config` property `insert_settings` described
+below.
+- Fixed an issue where incremental materializations would incorrectly exclude duplicated inserted elements due to "automatic"
+ClickHouse deduplication on replicated tables.  Closes https://github.com/ClickHouse/dbt-clickhouse/issues/213.  The fix consists
+of always sending a `replicated_deduplication_window=0` table setting when creating the incremental relations.  This
+behavior can be overridden by setting the new profile parameter `allow_automatic_deduplication` to `True`, although for
+general dbt operations this is probably not necessary and not recommended.  Finally thanks to Andy(https://github.com/andy-miracl)
+for the report and debugging help!
+
+#### Improvements
+- Added a new profile property `allow_automatic_deduplication`, which defaults to `False`.  ClickHouse Replicated deduplication is
+now disable for incremental inserts, but this property can be set to true if for some reason the default ClickHouse behavior
+for inserted blocks is desired.
+- Added a new model `config` property `query_settings` for any ClickHouse settings that should be sent with the `INSERT INTO`
+or `DELETE_FROM` queries used with materializations.  Note this is distinct from the existing property `settings` which is
+used for ClickHouse "table" settings in DDL statements like `CREATE TABLE ... AS`.
+
+### Release [1.5.1], 2023-11-27
+#### Bug Fix
+- Fix table materialization for compatibility with SQLFluff.  Thanks to [Kristof Szaloki](https://github.com/kris947) for the PR!
+
+### Release [1.5.0], 2023-11-23
+#### Improvements
+- Compatible with dbt 1.5.x
+- Contract support (using exact column data types)
+
+#### Bug Fix
+- Fix s3 macro when bucket includes `https://` prefix.  Closes https://github.com/ClickHouse/dbt-clickhouse/issues/192.
+
+### Release [1.4.9], 2023-10-27
+#### Improvement
+- Lots of work on Distributed table materializations.  Big thanks to [gfunc](https://github.com/gfunc) for the additional PR
+and [Zhenbang](https://github.com/zli06160) for code review and suggestions.  See the README for details on how to
+use the new functionality.
+#### Bug Fix
+- dbt would fail if a cluster name contained a dash.  This has been fixed.  Thanks to [Andy](https://github.com/the4thamigo-uk
+for the PR
+
+### Release [1.4.8], 2023-08-22
+#### Bug Fix
+- Fixed issues with experimental Distributed table materializations.  Closes https://github.com/ClickHouse/dbt-clickhouse/issues/179.
+Thanks to [Zhebnang](https://github.com/zli06160) for the report and for contributing to the fix with [gfunc](https://github.com/gfunc).
+
+### Release [1.4.7], 2023-08-09
+#### Bug Fix
+- Fixed an exception in "legacy" incremental materializations that are not distributed
+
+### Release [1.4.6], 2023-07-27
+#### Bug fix
+- Lightweight deletes could fail in environments where the HTTP session was not preserved (such as clusters behind a non-sticky
+load balancer).  This has been fixed by sending the required settings with every request instead of relying on a SET statement.
+A similar approach has been used to persist the 'insert_distributed_sync' setting for Distributed table materializations.
+
+### Release [1.4.5], 2023-07-27
+#### Improvement
+- Adds additional experimental support for Distributed table engine models and incremental materialization.  See the README for
+details.  Thanks to [gladkikhtutu](https://github.com/gladkikhtutu) for the contribution!
+
+### Release [1.4.4], 2023-07-19
+#### Bug Fixes
+- Fixed two logging/exception handling issues that would cause exception on startup or when handling some exceptions
+from the ClickHouse server.  Partially addresses https://github.com/ClickHouse/dbt-clickhouse/issues/169.
+- Fixed issue with the `on_cluster` macro that would break the exchange tables step of incremental materializations
+with an active cluster.  Thanks to [Andrew Davis](https://github.com/Savid) for the PR.  Closes
+https://github.com/ClickHouse/dbt-clickhouse/issues/167
+
+### Release [1.4.3], 2023-06-27
+#### Bug Fix
+- Use correct return value for `execute`.  This would cause an exception when running hooks.  Thanks to
+[Sergey Reshetnikov](https://github.com/PrVrSs) for the PR.  Closed https://github.com/ClickHouse/dbt-clickhouse/issues/161
+
+#### Improvement
+- Added macros for creating distributed tables.  See the `distributed_table.sql` include file.  Thanks to
+[gladkikhtutu](https://github.com/gladkikhtutu) for the contribution.  
+
+### Release [1.4.2], 2023-05-14
+#### Bug fixes
+- Create initial dbt database (if not found) on the defined cluster on first run, instead of just the execution node.
+Thanks to [Jens Hoevenaars](https://github.com/codenation-nl) for the PR
+- Fix the SYSTEM SYNC REPLICA statement when exchanging tables ON CLUSTER for incremental materializations.  Thanks to
+[Schum](https://github.com/Schum-io) for PR.  Closed https://github.com/ClickHouse/dbt-clickhouse/issues/157.
+
 ### Release [1.4.1], 2023-05-11
 #### Improvements
 - Reduce the number of SQL calls for Modify Comment operations.  Thanks to [Konstantin Ilchenko](https://github.com/simpl1g).

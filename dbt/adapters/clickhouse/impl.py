@@ -1,25 +1,37 @@
 import csv
 import io
-from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Set, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
-import agate
-import dbt.exceptions
 from dbt.adapters.base import AdapterConfig, available
-from dbt.adapters.base.impl import catch_as_completed
+from dbt.adapters.base.impl import BaseAdapter, ConstraintSupport
 from dbt.adapters.base.relation import BaseRelation, InformationSchema
+from dbt.adapters.capability import Capability, CapabilityDict, CapabilitySupport, Support
 from dbt.adapters.sql import SQLAdapter
-from dbt.clients.agate_helper import table_from_rows
 from dbt.contracts.graph.manifest import Manifest
-from dbt.contracts.relation import RelationType
+from dbt.contracts.graph.nodes import ConstraintType, ModelLevelConstraint
+from dbt.contracts.relation import Path
+from dbt.events.functions import warn_or_error
+from dbt.events.types import ConstraintNotSupported
 from dbt.exceptions import DbtInternalError, DbtRuntimeError, NotImplementedError
-from dbt.utils import executor, filter_null_values
+from dbt.utils import filter_null_values
 
+import dbt
+from dbt.adapters.clickhouse.cache import ClickHouseRelationsCache
 from dbt.adapters.clickhouse.column import ClickHouseColumn
 from dbt.adapters.clickhouse.connections import ClickHouseConnectionManager
+from dbt.adapters.clickhouse.errors import (
+    schema_change_datatype_error,
+    schema_change_fail_error,
+    schema_change_missing_source_error,
+)
 from dbt.adapters.clickhouse.logger import logger
-from dbt.adapters.clickhouse.relation import ClickHouseRelation
+from dbt.adapters.clickhouse.query import quote_identifier
+from dbt.adapters.clickhouse.relation import ClickHouseRelation, ClickHouseRelationType
+from dbt.adapters.clickhouse.util import NewColumnDataType, compare_versions
+
+if TYPE_CHECKING:
+    import agate
 
 GET_CATALOG_MACRO_NAME = 'get_catalog'
 LIST_SCHEMAS_MACRO_NAME = 'list_schemas'
@@ -30,6 +42,8 @@ class ClickHouseConfig(AdapterConfig):
     engine: str = 'MergeTree()'
     order_by: Optional[Union[List[str], str]] = 'tuple()'
     partition_by: Optional[Union[List[str], str]] = None
+    sharding_key: Optional[Union[List[str], str]] = 'rand()'
+    ttl: Optional[Union[List[str], str]] = None
 
 
 class ClickHouseAdapter(SQLAdapter):
@@ -38,34 +52,55 @@ class ClickHouseAdapter(SQLAdapter):
     ConnectionManager = ClickHouseConnectionManager
     AdapterSpecificConfigs = ClickHouseConfig
 
+    CONSTRAINT_SUPPORT = {
+        ConstraintType.check: ConstraintSupport.ENFORCED,
+        ConstraintType.not_null: ConstraintSupport.NOT_SUPPORTED,
+        ConstraintType.unique: ConstraintSupport.NOT_SUPPORTED,
+        ConstraintType.primary_key: ConstraintSupport.NOT_SUPPORTED,
+        ConstraintType.foreign_key: ConstraintSupport.NOT_SUPPORTED,
+    }
+
+    _capabilities: CapabilityDict = CapabilityDict(
+        {
+            Capability.SchemaMetadataByRelations: CapabilitySupport(support=Support.Unsupported),
+            Capability.TableLastModifiedMetadata: CapabilitySupport(support=Support.Unsupported),
+        }
+    )
+
+    def __init__(self, config):
+        BaseAdapter.__init__(self, config)
+        self.cache = ClickHouseRelationsCache()
+
     @classmethod
     def date_function(cls):
         return 'now()'
 
     @classmethod
-    def convert_text_type(cls, agate_table: agate.Table, col_idx: int) -> str:
+    def convert_text_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
         return 'String'
 
     @classmethod
-    def convert_number_type(cls, agate_table: agate.Table, col_idx: int) -> str:
+    def convert_number_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
+        import agate
+
         decimals = agate_table.aggregate(agate.MaxPrecision(col_idx))
         # We match these type to the Column.TYPE_LABELS for consistency
         return 'Float32' if decimals else 'Int32'
 
     @classmethod
-    def convert_boolean_type(cls, agate_table: agate.Table, col_idx: int) -> str:
+    def convert_boolean_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
         return 'Bool'
 
     @classmethod
-    def convert_datetime_type(cls, agate_table: agate.Table, col_idx: int) -> str:
+    def convert_datetime_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
         return 'DateTime'
 
     @classmethod
-    def convert_date_type(cls, agate_table: agate.Table, col_idx: int) -> str:
+    def convert_date_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
         return 'Date'
 
     @classmethod
-    def convert_time_type(cls, agate_table: agate.Table, col_idx: int) -> str:
+    def convert_time_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
         raise NotImplementedError('`convert_time_type` is not implemented for this adapter!')
 
     @available.parse(lambda *a, **k: {})
@@ -73,6 +108,15 @@ class ClickHouseAdapter(SQLAdapter):
         conn = self.connections.get_if_exists()
         if conn.credentials.cluster:
             return f'"{conn.credentials.cluster}"'
+
+    @available.parse(lambda *a, **k: {})
+    def get_clickhouse_local_suffix(self):
+        conn = self.connections.get_if_exists()
+        suffix = conn.credentials.local_suffix
+        if suffix:
+            if suffix.startswith('_'):
+                return f'{suffix}'
+            return f'_{suffix}'
 
     @available
     def clickhouse_db_engine_clause(self):
@@ -102,6 +146,13 @@ class ClickHouseAdapter(SQLAdapter):
         return ch_db and ch_db.engine in ('Atomic', 'Replicated')
 
     @available.parse_none
+    def should_on_cluster(self, materialized: str = '', engine: str = '') -> bool:
+        conn = self.connections.get_if_exists()
+        if conn and conn.credentials.cluster:
+            return ClickHouseRelation.get_on_cluster(conn.credentials.cluster, materialized, engine)
+        return ClickHouseRelation.get_on_cluster('', materialized, engine)
+
+    @available.parse_none
     def calculate_incremental_strategy(self, strategy: str) -> str:
         conn = self.connections.get_if_exists()
         if not strategy or strategy == 'default':
@@ -117,6 +168,39 @@ class ClickHouseAdapter(SQLAdapter):
             )
             strategy = 'legacy'
         return strategy
+
+    @available.parse_none
+    def check_incremental_schema_changes(
+        self, on_schema_change, existing, target_sql
+    ) -> List[ClickHouseColumn]:
+        if on_schema_change not in ('fail', 'ignore', 'append_new_columns'):
+            raise DbtRuntimeError(
+                "Only `fail`, `ignore`, and `append_new_columns` supported for `on_schema_change`"
+            )
+        source = self.get_columns_in_relation(existing)
+        source_map = {column.name: column for column in source}
+        target = self.get_column_schema_from_query(target_sql)
+        target_map = {column.name: column for column in source}
+        source_not_in_target = [column for column in source if column.name not in target_map.keys()]
+        target_not_in_source = [column for column in target if column.name not in source_map.keys()]
+        new_column_data_types = []
+        for target_column in target:
+            source_column = source_map.get(target_column.name)
+            if source_column and source_column.dtype != target_column.dtype:
+                new_column_data_types.append(
+                    NewColumnDataType(source_column.name, target_column.dtype)
+                )
+        if new_column_data_types:
+            raise DbtRuntimeError(schema_change_datatype_error.format(new_column_data_types))
+        if source_not_in_target:
+            raise DbtRuntimeError(schema_change_missing_source_error.format(source_not_in_target))
+        if target_not_in_source and on_schema_change == 'fail':
+            raise DbtRuntimeError(
+                schema_change_fail_error.format(
+                    source_not_in_target, target_not_in_source, new_column_data_types
+                )
+            )
+        return target_not_in_source
 
     @available.parse_none
     def s3source_clause(
@@ -146,13 +230,12 @@ class ClickHouseAdapter(SQLAdapter):
         fmt = fmt or s3config.get('fmt')
         bucket = bucket or s3config.get('bucket', '')
         path = path or s3config.get('path', '')
-        url = bucket
+        url = bucket.replace('https://', '')
         if path:
             if bucket and path and not bucket.endswith('/') and not bucket.startswith('/'):
                 path = f'/{path}'
             url = f'{url}{path}'.replace('//', '/')
-        if not url.startswith('http'):
-            url = f'https://{url}'
+        url = f'https://{url}'
         access = ''
         if aws_access_key_id and not aws_secret_access_key:
             raise DbtRuntimeError('S3 aws_access_key_id specified without aws_secret_access_key')
@@ -192,26 +275,33 @@ class ClickHouseAdapter(SQLAdapter):
 
         relations = []
         for row in results:
-            name, schema, type_info, db_engine = row
-            rel_type = RelationType.View if 'view' in type_info else RelationType.Table
+            name, schema, type_info, db_engine, on_cluster = row
+            if 'view' in type_info:
+                rel_type = ClickHouseRelationType.View
+            elif type_info == 'dictionary':
+                rel_type = ClickHouseRelationType.Dictionary
+            else:
+                rel_type = ClickHouseRelationType.Table
             can_exchange = (
                 conn_supports_exchange
-                and rel_type == RelationType.Table
+                and rel_type == ClickHouseRelationType.Table
                 and db_engine in ('Atomic', 'Replicated')
             )
+
             relation = self.Relation.create(
-                database=None,
+                database='',
                 schema=schema,
                 identifier=name,
                 type=rel_type,
                 can_exchange=can_exchange,
+                can_on_cluster=(on_cluster >= 1),
             )
             relations.append(relation)
 
         return relations
 
     def get_relation(self, database: Optional[str], schema: str, identifier: str):
-        return super().get_relation(None, schema, identifier)
+        return super().get_relation('', schema, identifier)
 
     @available.parse_none
     def get_ch_database(self, schema: str):
@@ -223,47 +313,31 @@ class ClickHouseAdapter(SQLAdapter):
         except DbtRuntimeError:
             return None
 
-    def get_catalog(self, manifest):
-        schema_map = self._get_catalog_schemas(manifest)
+    def get_catalog(self, manifest) -> Tuple["agate.Table", List[Exception]]:
+        from dbt.clients.agate_helper import empty_table
 
-        with executor(self.config) as tpe:
-            futures: List[Future[agate.Table]] = []
-            for info, schemas in schema_map.items():
-                for schema in schemas:
-                    futures.append(
-                        tpe.submit_connected(
-                            self,
-                            schema,
-                            self._get_one_catalog,
-                            info,
-                            [schema],
-                            manifest,
-                        )
-                    )
-            catalogs, exceptions = catch_as_completed(futures)
-        return catalogs, exceptions
+        relations = self._get_catalog_relations(manifest)
+        schemas = set(relation.schema for relation in relations)
+        if schemas:
+            catalog = self._get_one_catalog(InformationSchema(Path()), schemas, manifest)
+        else:
+            catalog = empty_table()
+        return catalog, []
 
-    def _get_one_catalog(
-        self,
-        information_schema: InformationSchema,
-        schemas: Set[str],
-        manifest: Manifest,
-    ) -> agate.Table:
-        if len(schemas) != 1:
-            dbt.exceptions.raise_compiler_error(
-                f'Expected only one schema in clickhouse _get_one_catalog, found ' f'{schemas}'
-            )
+    def get_filtered_catalog(
+        self, manifest: Manifest, relations: Optional[Set[BaseRelation]] = None
+    ):
+        catalog, exceptions = self.get_catalog(manifest)
+        if relations and catalog:
+            relation_map = {(r.schema, r.identifier) for r in relations}
 
-        return super()._get_one_catalog(information_schema, schemas, manifest)
+            def in_map(row: "agate.Row"):
+                s = _expect_row_value("table_schema", row)
+                i = _expect_row_value("table_name", row)
+                return (s, i) in relation_map
 
-    @classmethod
-    def _catalog_filter_table(cls, table: agate.Table, manifest: Manifest) -> agate.Table:
-        table = table_from_rows(
-            table.rows,
-            table.column_names,
-            text_only_columns=['table_schema', 'table_name'],
-        )
-        return table.where(_catalog_filter_schemas(manifest))
+            catalog = catalog.where(in_map)
+        return catalog, exceptions
 
     def get_rows_different_sql(
         self,
@@ -344,11 +418,84 @@ class ClickHouseAdapter(SQLAdapter):
 
     @available
     def get_model_settings(self, model):
-        settings = model['config'].get('settings', dict())
+        settings = model['config'].get('settings', {})
+        materialization_type = model['config'].get('materialized')
+        conn = self.connections.get_if_exists()
+        conn.handle.update_model_settings(settings, materialization_type)
         res = []
         for key in settings:
             res.append(f' {key}={settings[key]}')
-        return '' if len(res) == 0 else 'SETTINGS ' + ', '.join(res) + '\n'
+        settings_str = '' if len(res) == 0 else 'SETTINGS ' + ', '.join(res) + '\n'
+        return f"""
+                    -- end_of_sql
+                    {settings_str}
+                    """
+
+    @available
+    def get_model_query_settings(self, model):
+        settings = model['config'].get('query_settings', {})
+        res = []
+        for key in settings:
+            res.append(f' {key}={settings[key]}')
+
+        if len(res) == 0:
+            return ''
+        else:
+            settings_str = 'SETTINGS ' + ', '.join(res) + '\n'
+            return f"""
+            -- settings_section
+            {settings_str}
+            """
+
+    @available.parse_none
+    def get_column_schema_from_query(self, sql: str, *_) -> List[ClickHouseColumn]:
+        """Get a list of the Columns with names and data types from the given sql."""
+        conn = self.connections.get_if_exists()
+        return conn.handle.columns_in_query(sql)
+
+    @available.parse_none
+    def format_columns(self, columns) -> List[Dict]:
+        return [{'name': column.name, 'data_type': column.data_type} for column in columns]
+
+    @available
+    def get_credentials(self, connection_overrides) -> Dict:
+        conn = self.connections.get_if_exists()
+        if conn is None or conn.credentials is None:
+            return dict()
+        credentials = {
+            'user': conn.credentials.user,
+            'password': conn.credentials.password,
+            'database': conn.credentials.database,
+            'host': conn.credentials.host,
+            'port': conn.credentials.port,
+        }
+        credentials.update(connection_overrides)
+
+        for key in connection_overrides.keys():
+            if not credentials[key]:
+                credentials.pop(key)
+
+        return credentials
+
+    @classmethod
+    def render_raw_columns_constraints(cls, raw_columns: Dict[str, Dict[str, Any]]) -> List:
+        rendered_columns = []
+        for v in raw_columns.values():
+            codec = f"CODEC({_codec})" if (_codec := v.get('codec')) else ""
+            rendered_columns.append(
+                f"{quote_identifier(v['name'])} {v['data_type']} {codec}".rstrip()
+            )
+            if v.get("constraints"):
+                warn_or_error(ConstraintNotSupported(constraint='column', adapter='clickhouse'))
+        return rendered_columns
+
+    @classmethod
+    def render_model_constraint(cls, constraint: ModelLevelConstraint) -> Optional[str]:
+        if constraint.type == ConstraintType.check and constraint.expression:
+            if not constraint.name:
+                raise DbtRuntimeError("CHECK Constraint 'name' is required")
+            return f"CONSTRAINT {constraint.name} CHECK ({constraint.expression})"
+        return None
 
 
 @dataclass
@@ -358,17 +505,17 @@ class ClickHouseDatabase:
     comment: str
 
 
-def _expect_row_value(key: str, row: agate.Row):
+def _expect_row_value(key: str, row: "agate.Row"):
     if key not in row.keys():
         raise DbtInternalError(f'Got a row without \'{key}\' column, columns: {row.keys()}')
 
     return row[key]
 
 
-def _catalog_filter_schemas(manifest: Manifest) -> Callable[[agate.Row], bool]:
+def _catalog_filter_schemas(manifest: Manifest) -> Callable[["agate.Row"], bool]:
     schemas = frozenset((None, s) for d, s in manifest.get_used_schemas())
 
-    def test(row: agate.Row) -> bool:
+    def test(row: "agate.Row") -> bool:
         table_database = _expect_row_value('table_database', row)
         table_schema = _expect_row_value('table_schema', row)
         if table_schema is None:
@@ -376,18 +523,6 @@ def _catalog_filter_schemas(manifest: Manifest) -> Callable[[agate.Row], bool]:
         return (table_database, table_schema) in schemas
 
     return test
-
-
-def compare_versions(v1: str, v2: str) -> int:
-    v1_parts = v1.split('.')
-    v2_parts = v2.split('.')
-    for part1, part2 in zip(v1_parts, v2_parts):
-        try:
-            if int(part1) != int(part2):
-                return 1 if int(part1) > int(part2) else -1
-        except ValueError:
-            raise DbtRuntimeError("Version must consist of only numbers separated by '.'")
-    return 0
 
 
 COLUMNS_EQUAL_SQL = '''

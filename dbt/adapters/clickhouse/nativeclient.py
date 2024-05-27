@@ -1,10 +1,12 @@
+from typing import List
+
 import clickhouse_driver
 import pkg_resources
 from clickhouse_driver.errors import NetworkError, SocketTimeoutError
 from dbt.exceptions import DbtDatabaseError
 from dbt.version import __version__ as dbt_version
 
-from dbt.adapters.clickhouse import ClickHouseCredentials
+from dbt.adapters.clickhouse import ClickHouseColumn, ClickHouseCredentials
 from dbt.adapters.clickhouse.__version__ import version as dbt_clickhouse_version
 from dbt.adapters.clickhouse.dbclient import ChClientWrapper, ChRetryableException
 from dbt.adapters.clickhouse.logger import logger
@@ -30,15 +32,25 @@ class ChNativeClient(ChClientWrapper):
         except clickhouse_driver.errors.Error as ex:
             raise DbtDatabaseError(str(ex).strip()) from ex
 
+    def columns_in_query(self, sql: str, **kwargs) -> List[ClickHouseColumn]:
+        try:
+            _, columns = self._client.execute(
+                f"SELECT * FROM ( \n" f"{sql} \n" f") LIMIT 0",
+                with_column_types=True,
+            )
+            return [ClickHouseColumn.create(column[0], column[1]) for column in columns]
+        except clickhouse_driver.errors.Error as ex:
+            raise DbtDatabaseError(str(ex).strip()) from ex
+
     def get_ch_setting(self, setting_name):
         try:
             result = self._client.execute(
-                f"SELECT value FROM system.settings WHERE name = '{setting_name}'"
+                f"SELECT value, readonly FROM system.settings WHERE name = '{setting_name}'"
             )
         except clickhouse_driver.errors.Error as ex:
             logger.warn('Unexpected error retrieving ClickHouse server setting', ex)
             return None
-        return result[0][0] if result else None
+        return (result[0][0], result[0][1]) if result else (None, 0)
 
     def close(self):
         self._client.disconnect()
