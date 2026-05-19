@@ -12,7 +12,7 @@ on:  # yamllint disable-line rule:truthy
 jobs:
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: runners-set-amd64-small
 
     steps:
       - name: Checkout
